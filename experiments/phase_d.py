@@ -5,7 +5,8 @@
     uv run python experiments/phase_d.py blur      # Experiment 3 (Fourier low-pass)
     uv run python experiments/phase_d.py prior     # C2: prior-strength intervention
 
-Add --quick to any of them for a smoke test (1 source, 1 seed, short fits).
+Several names run one after another (e.g. `phase_d.py masking snr`). Add --quick to
+any of them for a smoke test (1 source, 1 seed, short fits).
 
 Each writes results/phase_d_<name>.csv with one row per (case, feature).
 """
@@ -102,14 +103,16 @@ RUNNERS = {"masking": run_masking, "snr": run_snr, "blur": run_blur, "prior": ru
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("experiment", choices=RUNNERS)
+    ap.add_argument("experiments", nargs="+", choices=RUNNERS, metavar="{" + ",".join(RUNNERS) + "}")
     args = parse_args(ap)
     if is_quick():
         use_quick_settings()
-    rows = RUNNERS[args.experiment](Config.load(), population_std())
-    path = results_dir() / f"phase_d_{args.experiment}.csv"
-    pd.DataFrame(rows).to_csv(path, index=False)
-    print("wrote", path)
+    cfg, pop = Config.load(), population_std()
+    for name in args.experiments:
+        rows = RUNNERS[name](cfg, pop)
+        path = results_dir() / f"phase_d_{name}.csv"
+        pd.DataFrame(rows).to_csv(path, index=False)
+        print("wrote", path)
 
 
 if __name__ == "__main__":
