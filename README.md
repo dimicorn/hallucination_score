@@ -21,9 +21,16 @@ equinox 0.10.x, which needs jax of the same era.
 `--no-sync` so uv does not revert it:
 
 ```bash
-uv pip install "jax[cuda12_pip]==0.4.18" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv pip install "jax[cuda12_pip]==0.4.18" "nvidia-cudnn-cu12==8.9.7.29" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run --no-sync python scripts/clear_execstack.py
 uv run --no-sync python -c "import jax; print(jax.devices())"
 ```
+
+The cuDNN pin is needed because the jaxlib wheel is built against cuDNN 8.9 and the
+extra would otherwise pull in 9.x. On glibc ≥ 2.41, jaxlib 0.4.18 fails to import with
+`cannot enable executable stack as shared object requires`; `clear_execstack.py`
+clears that flag on jaxlib's shared libraries and has to be rerun after every jaxlib
+reinstall.
 
 ## Running the experiments
 
