@@ -55,11 +55,14 @@ class Config:
         if path.exists():
             best = json.loads(path.read_text())["best"]
             cfg = cls(prior_t=best["prior_t"], prior_weight=best["prior_weight"], anneal_from=best["anneal_from"])
-            print(f"[config] from {path}: {cfg}")
+            source = f"from {path}"
         else:
             cfg = cls()
-            print(f"[config] {path} not found, using provisional defaults")
-        return replace(cfg, steps=QUICK_STEPS) if _quick else cfg
+            source = f"provisional defaults ({path} not found)"
+        if _quick:
+            cfg = replace(cfg, steps=QUICK_STEPS)
+        print(f"[config] {source}: {cfg}")
+        return cfg
 
     def prior(self, weight=None):
         return ScorePrior(t=self.prior_t, weight=self.prior_weight if weight is None else weight)
