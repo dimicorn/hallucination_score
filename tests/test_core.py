@@ -68,16 +68,16 @@ def test_area_mask_fractions():
 
 
 def test_features_on_gaussians():
-    w2 = features.WINDOW_SIGMA**2
-    windowed = lambda s: s**2 * w2 / (s**2 + w2)  # Gaussian x Gaussian window variance
+    # adaptive moments are unbiased for Gaussian sources
     round_ = gaussian_galaxy(3.0, 3.0)
     vals = features.measure(round_)
-    assert vals["size"] == pytest.approx(np.sqrt(2 * windowed(3.0)), rel=0.02)
+    assert vals["size"] == pytest.approx(np.sqrt(2 * 3.0**2), rel=0.01)
+    assert vals["flux"] == pytest.approx(float(round_.sum()), rel=0.01)
     assert abs(vals["e1"]) < 1e-3 and abs(vals["e2"]) < 1e-3
     assert vals["asymmetry"] < 1e-3
 
-    # elongated along x: e1 = (sx^2 - sy^2) / (sx^2 + sy^2) of the windowed variances
-    e_expected = (windowed(4.0) - windowed(2.0)) / (windowed(4.0) + windowed(2.0))
+    # elongated along x: e1 = (sx^2 - sy^2) / (sx^2 + sy^2)
+    e_expected = (4.0**2 - 2.0**2) / (4.0**2 + 2.0**2)
     assert features.e1(gaussian_galaxy(4.0, 2.0)) == pytest.approx(e_expected, abs=0.01)
     assert features.e2(gaussian_galaxy(4.0, 2.0, theta=np.pi / 4)) == pytest.approx(e_expected, abs=0.01)
 
@@ -102,6 +102,17 @@ def test_feature_gradients_finite():
     x = gaussian_galaxy(3.0, 2.0, theta=0.3)
     for name, g in features.gradients(x).items():
         assert np.all(np.isfinite(g)), name
+
+
+def test_feature_gradients_follow_the_source():
+    """The window adapts to the source, so the moment-based gradients stay on a compact,
+    off-centre galaxy instead of on background pixels at the stamp scale."""
+    x = gaussian_galaxy(1.5, 1.0, theta=0.3, center=(13.0, 18.0))
+    yy, xx = np.indices((N, N))
+    near = np.hypot(yy - 13.0, xx - 18.0) < 6.0
+    for name in ("flux", "size", "e1", "e2", "asymmetry"):
+        w = np.asarray(features.gradients(x)[name]) ** 2
+        assert w[near].sum() / w.sum() > 0.95, name
 
 
 def test_prior_curvature_is_score_jacobian():

@@ -106,7 +106,7 @@ def feature_attribution(obs, prior, x, population_std=None, rel_tol=1e-6):
     """C1 diagnostic for every feature in ``features.FEATURES``."""
     out = []
     for name, f in features.FEATURES.items():
-        g = jax.grad(f)(x)
+        g = features.GRADIENTS[name](x)
         gn = float(jnp.linalg.norm(g))
         v = g / gn
         i_d = curvature.quadratic_form(obs.curvature_matvec, v)

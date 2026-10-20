@@ -106,11 +106,17 @@ are still pending the full runs.
    The code therefore also reports `κ = I_P / I_cap` (how much of the cap the prior
    uses along a direction) and the absolute data support `I_D`. Phase A measures the
    t-sensitivity directly. A unit test confirms the learned prior respects the cap.
-5. **Windowed moments.** Unweighted second moments were dominated by faint
-   reconstructed halos (size 4.4 px vs 1.7 px true for one source), so moments use a
-   fixed σ = 6 px Gaussian window. Asymmetry rotates about the unwindowed centroid.
-   Autodiff gradients match finite differences (median relative error ≤ 0.5%; 2% for
-   asymmetry because of bilinear-interpolation kinks).
+5. **Adaptive windowed moments.** Unweighted second moments were dominated by faint
+   reconstructed halos (size 4.4 px vs 1.7 px true for one source). A fixed σ = 6 px
+   window fixed that, but the first full run showed it put 95–99.5% of the gradient of
+   flux, size, e1, e2, concentration and asymmetry on background pixels about 10 px out,
+   so those six features all measured the same annulus (`docs/RESULTS.md`). Moments
+   now use an adaptive elliptical Gaussian window (HSM-style fixed point, exact for
+   Gaussian sources), flux is the adaptive flux, and asymmetry rotates about the
+   adaptive centre inside a window twice as wide. On the truths the background share of
+   the gradient drops to 9–15% (concentration 55%, from its flat outer aperture).
+   Autodiff gradients match float32 finite differences to a median relative error of
+   1–3%.
 6. **Feature correlations.** On the reference set, flux and size have Spearman
    ρ = 0.91, and flux and high-frequency power ρ = −0.69. Feature-level attributions
    for these are not independent; this is reported with the results rather than
