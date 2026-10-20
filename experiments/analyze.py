@@ -18,13 +18,13 @@ from scipy.stats import spearmanr
 
 import matplotlib.pyplot as plt
 from provenance.features import NAMES
-from provenance.pipeline import RESULTS, save_json
+from provenance.pipeline import parse_args, results_dir, save_json
 
 LOW_SUPPORT_FLAGS = ("weakly_constrained", "near_zero_total")
 
 
 def _load(name):
-    path = RESULTS / f"phase_d_{name}.csv"
+    path = results_dir() / f"phase_d_{name}.csv"
     if not path.exists():
         return None
     df = pd.read_csv(path)
@@ -158,6 +158,7 @@ def plot_intervention(piv, path):
 
 
 def main():
+    parse_args()
     summary = {}
     masking = _load("masking")
     if masking is not None:
@@ -168,21 +169,21 @@ def main():
         summary["masking_response"] = response(m, "flux_removed", groups=("mask_kind",))
         summary["masking_error_prediction"] = error_prediction(m)
         summary["masking_feature_vs_pixel"] = feature_level_vs_pixel(m)
-        curves(m, "mask_fraction", "mask_kind", RESULTS / "fig_masking.png", "Experiment 1: progressive masking (median, 16-84% over sources x noise draws)")
+        curves(m, "mask_fraction", "mask_kind", results_dir() / "fig_masking.png", "Experiment 1: progressive masking (median, 16-84% over sources x noise draws)")
     snr = _load("snr")
     if snr is not None:
         summary["snr_response"] = response(snr, "noise_scale")
         summary["snr_error_prediction"] = error_prediction(snr)
-        curves(snr, "noise_scale", None, RESULTS / "fig_snr.png", "Experiment 2: noise sweep (noise std x native)", logx=True)
+        curves(snr, "noise_scale", None, results_dir() / "fig_snr.png", "Experiment 2: noise sweep (noise std x native)", logx=True)
     blur = _load("blur")
     if blur is not None:
         blur["inv_cutoff"] = 1 / blur["blur_cutoff"]
         summary["blur_response"] = response(blur, "inv_cutoff")
-        curves(blur, "inv_cutoff", None, RESULTS / "fig_blur.png", "Experiment 3: Fourier low-pass (1 / cutoff; 0 = no low-pass)")
+        curves(blur, "inv_cutoff", None, results_dir() / "fig_blur.png", "Experiment 3: Fourier low-pass (1 / cutoff; 0 = no low-pass)")
     prior = _load("prior")
     if prior is not None:
         summary["intervention"], piv = intervention(prior)
-        plot_intervention(piv, RESULTS / "fig_intervention.png")
+        plot_intervention(piv, results_dir() / "fig_intervention.png")
     save_json(summary, "analysis.json")
     import json
 

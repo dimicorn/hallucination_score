@@ -9,19 +9,24 @@ import itertools
 import numpy as np
 
 from provenance import data, forward
-from provenance.pipeline import Config, run_case, save_json
+from provenance.pipeline import QUICK_STEPS, Config, is_quick, parse_args, run_case, save_json
 
 GRID = {"prior_t": [0.0, 0.01, 0.05, 0.1, 0.2], "prior_weight": [0.0, 0.5, 1.0], "anneal_from": [None, 2.0]}
+QUICK_GRID = {"prior_t": [0.0, 0.05], "prior_weight": [0.0, 1.0], "anneal_from": [None, 2.0]}
 MASKS = {"full": None, "half": forward.half_plane_mask((32, 32), 0.5)}
 
 
 def main():
+    parse_args()
     dev, _ = data.split(data.load_sources())
+    grid, steps = (QUICK_GRID, QUICK_STEPS) if is_quick() else (GRID, Config.steps)
+    if is_quick():
+        dev = dev[:1]
     rows = []
-    for t, lam, ann in itertools.product(*GRID.values()):
+    for t, lam, ann in itertools.product(*grid.values()):
         if lam == 0.0 and (t, ann) != (0.05, None):
             continue  # likelihood-only baseline, run once
-        cfg = Config(prior_t=t, prior_weight=lam, anneal_from=ann)
+        cfg = Config(prior_t=t, prior_weight=lam, anneal_from=ann, steps=steps)
         errs = {k: [] for k in MASKS}
         for src in dev:
             for name, mask in MASKS.items():

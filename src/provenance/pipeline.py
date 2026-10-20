@@ -1,7 +1,8 @@
 """Shared configuration and the simulate -> reconstruct step used by all experiments."""
 
+import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import jax
@@ -11,7 +12,31 @@ import numpy as np
 from . import forward, reconstruct
 from .prior import ScorePrior
 
-RESULTS = Path(__file__).resolve().parents[2] / "results"
+RESULTS_ROOT = Path(__file__).resolve().parents[2] / "results"
+QUICK_STEPS = 200
+_quick = False
+
+
+def parse_args(parser=None):
+    """Parse the command line shared by all experiment scripts (adds --quick)."""
+    global _quick
+    parser = argparse.ArgumentParser() if parser is None else parser
+    parser.add_argument("--quick", action="store_true", help="smoke test: 1 source, 1 seed, short fits; writes to results/quick/")
+    args = parser.parse_args()
+    _quick = args.quick
+    if _quick:
+        print(f"[quick] smoke-test mode, writing to {results_dir()}")
+    return args
+
+
+def is_quick():
+    return _quick
+
+
+def results_dir():
+    path = RESULTS_ROOT / "quick" if _quick else RESULTS_ROOT
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @dataclass(frozen=True)
@@ -26,14 +51,15 @@ class Config:
 
     @classmethod
     def load(cls):
-        path = RESULTS / "tune_prior.json"
-        if not path.exists():
-            print(f"[config] {path.name} not found, using provisional defaults")
-            return cls()
-        best = json.loads(path.read_text())["best"]
-        cfg = cls(prior_t=best["prior_t"], prior_weight=best["prior_weight"], anneal_from=best["anneal_from"])
-        print(f"[config] from {path.name}: {cfg}")
-        return cfg
+        path = results_dir() / "tune_prior.json"
+        if path.exists():
+            best = json.loads(path.read_text())["best"]
+            cfg = cls(prior_t=best["prior_t"], prior_weight=best["prior_weight"], anneal_from=best["anneal_from"])
+            print(f"[config] from {path}: {cfg}")
+        else:
+            cfg = cls()
+            print(f"[config] {path} not found, using provisional defaults")
+        return replace(cfg, steps=QUICK_STEPS) if _quick else cfg
 
     def prior(self, weight=None):
         return ScorePrior(t=self.prior_t, weight=self.prior_weight if weight is None else weight)
@@ -58,8 +84,7 @@ def run_case(source, cfg, mask=None, noise_scale=1.0, blur_cutoff=None, seed=0, 
 
 
 def save_json(obj, name):
-    RESULTS.mkdir(exist_ok=True)
-    path = RESULTS / name
+    path = results_dir() / name
     path.write_text(json.dumps(obj, indent=2, default=_to_builtin))
     return path
 

@@ -5,6 +5,8 @@
     uv run python experiments/phase_d.py blur      # Experiment 3 (Fourier low-pass)
     uv run python experiments/phase_d.py prior     # C2: prior-strength intervention
 
+Add --quick to any of them for a smoke test (1 source, 1 seed, short fits).
+
 Each writes results/phase_d_<name>.csv with one row per (case, feature).
 """
 
@@ -15,14 +17,22 @@ import pandas as pd
 
 from provenance import data, forward
 from provenance.evaluate import evaluate, population_std
-from provenance.pipeline import RESULTS, Config
+from provenance.pipeline import Config, is_quick, parse_args, results_dir
 
 N_SOURCES = 12
 SHAPE = (32, 32)
 MASK_FRACTIONS = (0.0, 0.25, 0.5, 0.75)
 NOISE_SCALES = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0)
 BLUR_CUTOFFS = (None, 0.2, 0.15, 0.1, 0.07)
-PRIOR_WEIGHTS = (0.5, 1.0, 2.0)
+SEEDS = (0, 1, 2)
+BLUR_SEEDS = (0, 1)
+PRIOR_WEIGHTS = (0.5, 1.0, 2.0)  # the intervention analysis needs all three
+
+
+def use_quick_settings():
+    global N_SOURCES, MASK_FRACTIONS, NOISE_SCALES, BLUR_CUTOFFS, SEEDS, BLUR_SEEDS
+    N_SOURCES, MASK_FRACTIONS, NOISE_SCALES, BLUR_CUTOFFS = 1, (0.0, 0.5), (1.0, 4.0), (None, 0.1)
+    SEEDS = BLUR_SEEDS = (0,)
 
 
 def eval_sources():
@@ -39,34 +49,34 @@ def masks_for(src):
         yield "outer", f, forward.flux_mask(src.truth, f, "outer")
 
 
-def run_masking(cfg, pop, seeds=(0, 1, 2)):
+def run_masking(cfg, pop):
     rows = []
     for src in eval_sources():
         for kind, frac, mask in masks_for(src):
             flux_removed = 0.0 if mask is None else float((src.truth * (1 - mask)).sum() / src.truth.sum())
-            for seed in seeds:
+            for seed in SEEDS:
                 cond = {"experiment": "masking", "mask_kind": kind, "mask_fraction": frac, "flux_removed": flux_removed, "seed": seed}
                 rows += evaluate(src, cfg, pop, cond, mask=mask, seed=seed)[0]
         print(src.source_id, flush=True)
     return rows
 
 
-def run_snr(cfg, pop, seeds=(0, 1, 2)):
+def run_snr(cfg, pop):
     rows = []
     for src in eval_sources():
         for ns in NOISE_SCALES:
-            for seed in seeds:
+            for seed in SEEDS:
                 cond = {"experiment": "snr", "noise_scale": ns, "snr_effective": src.snr / ns, "seed": seed}
                 rows += evaluate(src, cfg, pop, cond, noise_scale=ns, seed=seed)[0]
         print(src.source_id, flush=True)
     return rows
 
 
-def run_blur(cfg, pop, seeds=(0, 1)):
+def run_blur(cfg, pop):
     rows = []
     for src in eval_sources():
         for cut in BLUR_CUTOFFS:
-            for seed in seeds:
+            for seed in BLUR_SEEDS:
                 cond = {"experiment": "blur", "blur_cutoff": np.inf if cut is None else cut, "seed": seed}
                 rows += evaluate(src, cfg, pop, cond, blur_cutoff=cut, seed=seed)[0]
         print(src.source_id, flush=True)
@@ -93,10 +103,11 @@ RUNNERS = {"masking": run_masking, "snr": run_snr, "blur": run_blur, "prior": ru
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("experiment", choices=RUNNERS)
-    args = ap.parse_args()
+    args = parse_args(ap)
+    if is_quick():
+        use_quick_settings()
     rows = RUNNERS[args.experiment](Config.load(), population_std())
-    RESULTS.mkdir(exist_ok=True)
-    path = RESULTS / f"phase_d_{args.experiment}.csv"
+    path = results_dir() / f"phase_d_{args.experiment}.csv"
     pd.DataFrame(rows).to_csv(path, index=False)
     print("wrote", path)
 

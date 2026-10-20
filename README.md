@@ -29,6 +29,18 @@ uv run --no-sync python -c "import jax; print(jax.devices())"
 
 Run in this order; everything writes to `results/` (git-ignored).
 
+**Smoke test first.** Every script accepts `--quick` (1 source, 1 seed, 200-step fits,
+few probes) and writes to `results/quick/` instead, so it never touches real results.
+The whole chain takes about 2 minutes on CPU:
+
+```bash
+for s in tune_prior phase_b_features phase_a_baseline; do uv run python experiments/$s.py --quick; done
+for e in masking snr blur prior; do uv run python experiments/phase_d.py $e --quick; done
+uv run python experiments/analyze.py --quick
+```
+
+Quick-mode numbers are for catching crashes only, not results.
+
 | Step | Command | What it does |
 |---|---|---|
 | 1 | `uv run python experiments/tune_prior.py` | Picks prior time `t`, weight `λ`, annealing on the **dev** split (21 settings × 16 fits). Later steps read `results/tune_prior.json`. |

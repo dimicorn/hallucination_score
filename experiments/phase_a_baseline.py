@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from provenance import attribution, curvature, data, forward
-from provenance.pipeline import RESULTS, Config, run_case, save_json
+from provenance.pipeline import Config, is_quick, parse_args, results_dir, run_case, save_json
 from provenance.prior import ScorePrior
 
 N_SOURCES = 12
@@ -27,6 +27,12 @@ SEEDS = (0, 1, 2)
 PROBES = (16, 64, 256, 1024, 4000)
 PROBE_SEEDS = range(5)
 T_EVAL = (0.01, 0.02, 0.05, 0.1, 0.2)
+N_HUTCHINSON_SOURCES = 3
+
+
+def use_quick_settings():
+    global N_SOURCES, SEEDS, PROBES, PROBE_SEEDS, T_EVAL, N_HUTCHINSON_SOURCES
+    N_SOURCES, SEEDS, PROBES, PROBE_SEEDS, T_EVAL, N_HUTCHINSON_SOURCES = 1, (0,), (16, 64), range(2), (0.05, 0.2), 1
 FOOTPRINT = 0.02  # fraction of peak defining the source footprint
 SHAPE = (32, 32)
 HALF = forward.half_plane_mask(SHAPE, 0.5)  # rows 0..15 unobserved
@@ -66,7 +72,7 @@ def control_experiment(cfg, sources):
 
 def hutchinson_experiment(cfg, sources):
     out = []
-    for src in sources[:3]:
+    for src in sources[:N_HUTCHINSON_SOURCES]:
         case = run_case(src, cfg, mask=HALF)
         prior = cfg.prior()
         mv = lambda v: prior.curvature_matvec(case.x_hat, v)
@@ -186,6 +192,9 @@ def plot_convergence(hutch, path):
 
 
 def main():
+    parse_args()
+    if is_quick():
+        use_quick_settings()
     cfg = Config.load()
     sources = eval_sources()
     rows, examples = control_experiment(cfg, sources)
@@ -196,9 +205,8 @@ def main():
         str(t): {k: float(np.nanmedian([r[k] for r in tsens if r["t_eval"] == t])) for k in tsens[0] if k not in ("source", "t_eval")}
         for t in T_EVAL
     }
-    RESULTS.mkdir(exist_ok=True)
-    plot_baseline(examples, RESULTS / "fig_phase_a_baseline.png")
-    plot_convergence(hutch, RESULTS / "fig_phase_a_hutchinson.png")
+    plot_baseline(examples, results_dir() / "fig_phase_a_baseline.png")
+    plot_convergence(hutch, results_dir() / "fig_phase_a_hutchinson.png")
     save_json({"config": cfg, "summary": summary, "rows": rows, "hutchinson": hutch, "t_sensitivity": tsens}, "phase_a.json")
     print(summary)
     for h in hutch:

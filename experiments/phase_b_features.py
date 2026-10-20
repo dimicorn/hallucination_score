@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from provenance import data, features
-from provenance.pipeline import RESULTS, save_json
+from provenance.pipeline import is_quick, parse_args, results_dir, save_json
 
 
 def gradient_check(x, f, n_dirs=5, eps=1e-3, seed=0):
@@ -27,7 +27,10 @@ def gradient_check(x, f, n_dirs=5, eps=1e-3, seed=0):
 
 
 def main():
+    parse_args()
     sources = data.load_sources()
+    if is_quick():
+        sources = sources[:20]
     table = pd.DataFrame([{"source": s.source_id, "snr": s.snr, **features.measure(jnp.asarray(s.truth, jnp.float32))} for s in sources])
     stats = {n: {"mean": float(table[n].mean()), "std": float(table[n].std()), "q16": float(table[n].quantile(0.16)), "q84": float(table[n].quantile(0.84))} for n in features.NAMES}
 
@@ -38,8 +41,7 @@ def main():
 
     corr = table[list(features.NAMES)].corr(method="spearman")
     save_json({"n_sources": len(sources), "population": stats, "gradient_check_median_relerr": checks, "spearman_corr": corr.round(3).to_dict()}, "feature_population.json")
-    RESULTS.mkdir(exist_ok=True)
-    table.to_csv(RESULTS / "feature_reference_table.csv", index=False)
+    table.to_csv(results_dir() / "feature_reference_table.csv", index=False)
 
     fig, axes = plt.subplots(1, len(features.NAMES) + 1, figsize=(22, 3))
     for ax, n in zip(axes, features.NAMES):
@@ -51,7 +53,7 @@ def main():
     axes[-1].set_title("Spearman")
     plt.colorbar(im, ax=axes[-1])
     fig.tight_layout()
-    fig.savefig(RESULTS / "fig_phase_b_features.png", dpi=130)
+    fig.savefig(results_dir() / "fig_phase_b_features.png", dpi=130)
     print(pd.DataFrame(stats).T.round(4))
     print("gradient checks (median rel err):", {k: round(v, 4) for k, v in checks.items()})
     print(corr.round(2))

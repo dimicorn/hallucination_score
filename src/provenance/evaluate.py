@@ -10,13 +10,13 @@ import json
 import numpy as np
 
 from . import attribution, features
-from .pipeline import RESULTS, run_case
+from .pipeline import results_dir, run_case
 
 FOOTPRINT = 0.02
 
 
 def population_std():
-    stats = json.loads((RESULTS / "feature_population.json").read_text())["population"]
+    stats = json.loads((results_dir() / "feature_population.json").read_text())["population"]
     return {k: v["std"] for k, v in stats.items()}
 
 
