@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.pkl
+results/
+docs/*.pdf
+.DS_Store
