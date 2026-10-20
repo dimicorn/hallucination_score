@@ -32,6 +32,10 @@ extra would otherwise pull in 9.x. On glibc ≥ 2.41, jaxlib 0.4.18 fails to imp
 clears that flag on jaxlib's shared libraries and has to be rerun after every jaxlib
 reinstall.
 
+A plain `uv run` re-syncs to the lockfile and silently puts the CPU jaxlib back, so on
+the GPU machine set `export UV_NO_SYNC=1` (e.g. in `~/.bashrc`); the commands below then
+work unchanged. `CUDA_VISIBLE_DEVICES=<id>` keeps a run on one GPU.
+
 ## Running the experiments
 
 Run in this order; everything writes to `results/` (git-ignored).

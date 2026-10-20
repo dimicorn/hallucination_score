@@ -28,7 +28,7 @@ Full runs go in the same order without `--quick`. The order matters because of f
 - `phase_b_features.py` writes `feature_population.json`; `evaluate.population_std()` needs it, so `phase_d.py` fails without it.
 - `analyze.py` reads whichever `phase_d_*.csv` exist.
 
-GPU: follow the README's GPU steps (CUDA jaxlib + cuDNN 8.9 pin, then `scripts/clear_execstack.py` on glibc ≥ 2.41), then always use `uv run --no-sync ...` so uv doesn't revert jax. A `cannot enable executable stack` ImportError means jaxlib was reinstalled and the script needs rerunning.
+GPU: follow the README's GPU steps (CUDA jaxlib + cuDNN 8.9 pin, then `scripts/clear_execstack.py` on glibc ≥ 2.41), then always use `uv run --no-sync ...` (or `export UV_NO_SYNC=1`) so uv doesn't revert jax; "a CUDA-enabled jaxlib is not installed. Falling back to cpu" means it was reverted. A `cannot enable executable stack` ImportError means jaxlib was reinstalled and the script needs rerunning.
 
 ## Dependency pins
 
