@@ -16,12 +16,24 @@ RESULTS = Path(__file__).resolve().parents[2] / "results"
 
 @dataclass(frozen=True)
 class Config:
-    # chosen on the dev split only (experiments/tune_prior.py)
+    # provisional defaults; experiments use Config.load(), which takes the setting
+    # chosen on the dev split by experiments/tune_prior.py when that has been run
     prior_t: float = 0.05
     prior_weight: float = 1.0
-    anneal_from: float = 2.0
+    anneal_from: float | None = 2.0
     steps: int = 1500
     lr: float = 1e-2
+
+    @classmethod
+    def load(cls):
+        path = RESULTS / "tune_prior.json"
+        if not path.exists():
+            print(f"[config] {path.name} not found, using provisional defaults")
+            return cls()
+        best = json.loads(path.read_text())["best"]
+        cfg = cls(prior_t=best["prior_t"], prior_weight=best["prior_weight"], anneal_from=best["anneal_from"])
+        print(f"[config] from {path.name}: {cfg}")
+        return cfg
 
     def prior(self, weight=None):
         return ScorePrior(t=self.prior_t, weight=self.prior_weight if weight is None else weight)

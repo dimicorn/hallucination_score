@@ -28,3 +28,4 @@ packages = ["src/provenance"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore:As of Equinox 0.10.7:UserWarning"]

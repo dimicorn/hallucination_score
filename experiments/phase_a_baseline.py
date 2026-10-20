@@ -186,7 +186,7 @@ def plot_convergence(hutch, path):
 
 
 def main():
-    cfg = Config()
+    cfg = Config.load()
     sources = eval_sources()
     rows, examples = control_experiment(cfg, sources)
     hutch = hutchinson_experiment(cfg, sources)

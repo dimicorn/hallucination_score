@@ -94,7 +94,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("experiment", choices=RUNNERS)
     args = ap.parse_args()
-    rows = RUNNERS[args.experiment](Config(), population_std())
+    rows = RUNNERS[args.experiment](Config.load(), population_std())
     RESULTS.mkdir(exist_ok=True)
     path = RESULTS / f"phase_d_{args.experiment}.csv"
     pd.DataFrame(rows).to_csv(path, index=False)
