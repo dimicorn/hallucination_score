@@ -9,7 +9,7 @@ The research plan is in [`docs/PLAN.md`](docs/PLAN.md).
 ## Setup
 
 ```bash
-uv sync                      # CPU environment (jax 0.4.18, equinox 0.10.7, galaxygrad 0.0.19)
+uv sync                      # jax 0.4.18, equinox 0.10.7, galaxygrad 0.0.19
 scripts/fetch_data.sh        # HSC tract 9697 / patch 72 source subset -> data/
 uv run pytest                # fast unit tests (~5 s)
 ```
@@ -17,24 +17,16 @@ uv run pytest                # fast unit tests (~5 s)
 The pins are deliberate: the galaxygrad 0.0.19 checkpoints deserialise with
 equinox 0.10.x, which needs jax of the same era.
 
-**GPU.** After `uv sync`, swap in a CUDA build of the same jax version and run with
-`--no-sync` so uv does not revert it:
+**GPU.** On x86-64 Linux, `uv sync` installs the CUDA 12 build of the same jaxlib
+(`0.4.18+cuda12.cudnn89`, from Google's wheel index) with cuDNN pinned to the 8.9 it is
+built against; it falls back to CPU on machines without a GPU. macOS (and ARM Linux,
+which has no CUDA wheel for this version) gets the CPU build. Check with
+`uv run python -c "import jax; print(jax.devices())"`.
 
-```bash
-uv pip install "jax[cuda12_pip]==0.4.18" "nvidia-cudnn-cu12==8.9.7.29" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-uv run --no-sync python scripts/clear_execstack.py
-uv run --no-sync python -c "import jax; print(jax.devices())"
-```
-
-The cuDNN pin is needed because the jaxlib wheel is built against cuDNN 8.9 and the
-extra would otherwise pull in 9.x. On glibc ≥ 2.41, jaxlib 0.4.18 fails to import with
-`cannot enable executable stack as shared object requires`; `clear_execstack.py`
-clears that flag on jaxlib's shared libraries and has to be rerun after every jaxlib
-reinstall.
-
-A plain `uv run` re-syncs to the lockfile and silently puts the CPU jaxlib back, so on
-the GPU machine set `export UV_NO_SYNC=1` (e.g. in `~/.bashrc`); the commands below then
-work unchanged. `CUDA_VISIBLE_DEVICES=<id>` keeps a run on one GPU.
+On glibc ≥ 2.41, jaxlib 0.4.18 fails to import with `cannot enable executable stack as
+shared object requires`. Run `uv run python scripts/clear_execstack.py` to clear that
+flag on jaxlib's shared libraries, and again whenever uv reinstalls jaxlib.
+`CUDA_VISIBLE_DEVICES=<id>` keeps a run on one GPU.
 
 ## Running the experiments
 

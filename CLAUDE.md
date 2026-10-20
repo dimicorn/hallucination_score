@@ -28,11 +28,13 @@ Full runs go in the same order without `--quick`. The order matters because of f
 - `phase_b_features.py` writes `feature_population.json`; `evaluate.population_std()` needs it, so `phase_d.py` fails without it.
 - `analyze.py` reads whichever `phase_d_*.csv` exist.
 
-GPU: follow the README's GPU steps (CUDA jaxlib + cuDNN 8.9 pin, then `scripts/clear_execstack.py` on glibc ≥ 2.41), then always use `uv run --no-sync ...` (or `export UV_NO_SYNC=1`) so uv doesn't revert jax; "a CUDA-enabled jaxlib is not installed. Falling back to cpu" means it was reverted. A `cannot enable executable stack` ImportError means jaxlib was reinstalled and the script needs rerunning.
+GPU: on x86-64 Linux the default `uv sync` already installs the CUDA jaxlib; macOS gets CPU. On glibc ≥ 2.41 a `cannot enable executable stack` ImportError means jaxlib was (re)installed and `uv run python scripts/clear_execstack.py` needs running (see README).
 
 ## Dependency pins
 
 `jax==0.4.18`, `equinox==0.10.7`, `galaxygrad==0.0.19`, `numpy<2` are deliberate: the galaxygrad checkpoints only deserialise with equinox 0.10.x, which needs jax from the same era. Don't upgrade them, and use APIs that exist in these versions (e.g. `eqx.static_field`, not `eqx.field(static=True)`).
+
+jaxlib is split by platform marker: `0.4.18+cuda12.cudnn89` from the `jax-cuda` index on x86-64 Linux, `0.4.18` from PyPI elsewhere. The two markers must stay disjoint, since `==0.4.18` also matches the `+cuda` local version and uv would otherwise lock the CUDA wheel for macOS. After editing dependencies, check with `uv export --no-hashes | grep jaxlib`.
 
 ## Architecture
 
