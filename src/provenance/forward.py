@@ -111,6 +111,19 @@ def area_mask(shape, fraction, kind, center=None):
     return m.reshape(shape)
 
 
+def random_mask(shape, fraction, kind, rng):
+    """Masks that do not look at the source: a ``fraction`` of the pixels chosen at
+    random (kind="pixels"), or a disc of that area at a random position (kind="blob").
+    The control for the reference-based ring masks of ``flux_mask``."""
+    if fraction == 0:
+        return np.ones(shape)
+    if kind == "blob":
+        return area_mask(shape, fraction, "core", center=rng.uniform(0, np.array(shape) - 1))
+    m = np.ones(int(np.prod(shape)))
+    m[rng.choice(m.size, int(round(fraction * m.size)), replace=False)] = 0
+    return m.reshape(shape)
+
+
 def flux_mask(truth, fraction, kind):
     """Remove ``fraction`` of the true source flux, starting from the core
     (kind="core") or from the outskirts (kind="outer"), in rings about the centroid.

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from provenance import attribution, curvature, features
-from provenance.forward import Observation, area_mask, half_plane_mask
+from provenance.forward import Observation, area_mask, half_plane_mask, random_mask
 from provenance.prior import ScorePrior
 
 N = 32
@@ -65,6 +65,17 @@ def test_area_mask_fractions():
     for kind in ("half-plane", "outer", "core"):
         for f in (0.0, 0.25, 0.5, 0.75):
             assert 1 - area_mask((N, N), f, kind).mean() == pytest.approx(f, abs=0.02)
+
+
+def test_random_masks_ignore_the_source_and_are_reproducible():
+    for kind in ("pixels", "blob"):
+        for f in (0.25, 0.5, 0.75):
+            m = random_mask((N, N), f, kind, np.random.default_rng(3))
+            assert 1 - m.mean() == pytest.approx(f, abs=0.02), (kind, f)
+            np.testing.assert_array_equal(m, random_mask((N, N), f, kind, np.random.default_rng(3)))
+        a, b = (random_mask((N, N), 0.5, kind, np.random.default_rng(s)) for s in (1, 2))
+        assert not np.array_equal(a, b)
+    assert random_mask((N, N), 0.0, "pixels", np.random.default_rng(0)).min() == 1
 
 
 def test_features_on_gaussians():

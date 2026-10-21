@@ -411,7 +411,7 @@ def main():
         summary["baseline_full_data"] = baseline(m[m.mask_kind == "none"])
         # the unmasked case is level 0 of every mask kind
         base = m[m.mask_kind == "none"]
-        m = pd.concat([m[m.mask_kind != "none"]] + [base.assign(mask_kind=k) for k in ("half-plane", "core", "outer")])
+        m = pd.concat([m[m.mask_kind != "none"]] + [base.assign(mask_kind=k) for k in m.mask_kind.unique() if k != "none"])
         summary["masking_response"] = response(m, "flux_removed", groups=("mask_kind",))
         summary["masking_paired_d_log10_I_D"] = paired_change(masking, masking.mask_kind == "none", ["mask_kind", "mask_fraction"])
         summary["masking_selectivity"] = mask_selectivity(masking)

@@ -33,6 +33,7 @@ Full runs go in the same order without `--quick`. The order matters because of f
 - `phase_b_features.py` writes `feature_population.json`; `evaluate.population_std()` needs it, so `phase_d.py` fails without it.
 - `analyze.py` reads whichever `phase_d_*.csv` exist.
 - `t_sensitivity.py` needs `tune_prior.json` and `feature_population.json`, and is independent of Phase D.
+- `phase_d.py --n-sources N --chunk k/K` writes `phase_d_<name>.part<k>of<K>.csv`; run `phase_d.py <names> --merge` before `analyze.py`, which only reads the merged `phase_d_<name>.csv` (an older merged file would otherwise be analysed).
 
 GPU: on x86-64 Linux the default `uv sync` already installs the CUDA jaxlib; macOS gets CPU. On glibc ≥ 2.41 a `cannot enable executable stack` ImportError means jaxlib was (re)installed and `uv run python scripts/clear_execstack.py` needs running (see README).
 

@@ -50,7 +50,7 @@ Quick-mode numbers are for catching crashes only, not results.
 | 1 | `uv run python experiments/tune_prior.py` | Picks prior time `t`, weight `λ`, annealing on the **dev** split (29 settings × 16 fits, t up to 1.0). Later steps read `results/tune_prior.json`. |
 | 2 | `uv run python experiments/phase_b_features.py` | Feature distributions on clean truths and autodiff-vs-finite-difference checks; writes the population mean, spread and covariance used by step 4 (seconds). |
 | 3 | `uv run python experiments/phase_a_baseline.py` | Pixel-level baseline: half-mask control (12 sources × 3 noise draws), exact-vs-Hutchinson convergence, F_P properties, t-sensitivity. |
-| 4 | `uv run python experiments/phase_d.py {masking,snr,blur,prior}` | Experiments 1–3 and the prior-strength intervention (C2), with the directional (C1) and Laplace feature-space diagnostics for every case. |
+| 4 | `uv run python experiments/phase_d.py {masking,snr,blur,prior}` | Experiments 1–3 and the prior-strength intervention (C2), with the directional (C1) and Laplace feature-space diagnostics for every case. Masking includes random-pixel and random-blob controls. `--n-sources N` (default 12) and `--chunk k/K` split a larger run across GPUs; `--merge` combines the parts. |
 | 4b | `uv run python experiments/t_sensitivity.py` | Feature-level attribution at t from 0.02 to 1.0, at fixed reconstructions and refitted, for 5 degradations × 12 sources. Independent of step 4. |
 | 5 | `uv run python experiments/analyze.py` | Figures and `results/analysis.json` from whichever step-4 outputs exist. |
 | 6 | `uv run python experiments/paper_figures.py` | Publication figures for the write-up in `results/paper/` (re-runs the two cases of the example figure). |

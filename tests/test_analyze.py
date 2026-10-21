@@ -158,3 +158,25 @@ def test_partial_correlation_removes_what_severity_explains():
     assert abs(analyze._partial_rho(diagnostic, error, [severity])) < 0.15
     informative = error + 0.02 * rng.normal(size=400)  # tracks the error beyond severity
     assert analyze._partial_rho(informative, error, [severity]) > 0.5
+
+
+def _load_script(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "experiments" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_phase_d_merges_complete_chunked_runs_only(tmp_path, monkeypatch):
+    phase_d = _load_script("phase_d")
+    monkeypatch.setattr(phase_d, "results_dir", lambda: tmp_path)
+    for k in (0, 2):
+        pd.DataFrame({"source": [f"s{k}"], "feature": ["flux"]}).to_csv(tmp_path / f"phase_d_masking.part{k}of3.csv", index=False)
+    with pytest.raises(SystemExit, match="missing"):
+        phase_d.merge("masking")
+    pd.DataFrame({"source": ["s1"], "feature": ["flux"]}).to_csv(tmp_path / "phase_d_masking.part1of3.csv", index=False)
+    phase_d.merge("masking")
+    assert sorted(pd.read_csv(tmp_path / "phase_d_masking.csv")["source"]) == ["s0", "s1", "s2"]
+    pd.DataFrame({"source": ["x"], "feature": ["flux"]}).to_csv(tmp_path / "phase_d_masking.part0of2.csv", index=False)
+    with pytest.raises(SystemExit, match="one split"):
+        phase_d.merge("masking")
