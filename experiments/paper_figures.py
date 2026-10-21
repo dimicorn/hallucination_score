@@ -37,6 +37,11 @@ EXAMPLE_KIND, EXAMPLE_FRACTION = "outer", 0.5
 plt.rcParams.update({"font.size": 8, "axes.titlesize": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "savefig.bbox": "tight", "savefig.pad_inches": 0.02})
 
 
+def _grid(ax, axis="both"):
+    ax.grid(axis=axis, color="0.85", lw=0.6)
+    ax.set_axisbelow(True)
+
+
 def _save(fig, name):
     out = results_dir() / "paper"
     out.mkdir(exist_ok=True)
@@ -67,6 +72,8 @@ def fig_main(masking, snr):
     axes[0].set(ylabel="$R$ (prior share)", ylim=(-0.03, 1.05))
     for ax in axes[:3]:
         ax.set_xticks([0, 0.25, 0.5, 0.75], ["0", ".25", ".5", ".75"])
+    for ax in axes:
+        _grid(ax)
     fig.tight_layout(w_pad=0.8, rect=(0, 0.1, 1, 1))
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=len(labels), frameon=False, handlelength=1.5, columnspacing=1.0)
@@ -113,6 +120,8 @@ def fig_errors(sweeps):
         axes[2].set(xticks=x, ylabel=r"fraction within $1\sigma$", ylim=(0, 1))
         axes[2].set_xticklabels([LABELS[f] for f in NAMES], rotation=45, ha="right")
         axes[2].legend(frameon=False, ncol=1, loc="lower left", bbox_to_anchor=(0, 1.04), borderaxespad=0)
+    for ax in axes:
+        _grid(ax, "y")
     fig.tight_layout(w_pad=0.8)
     _save(fig, "fig_errors")
 
@@ -162,9 +171,10 @@ def fig_example(masking, pop_std):
         cb.ax.tick_params(labelsize=6)
         bar_ax.bar(x + (i - 0.5) * 0.4, [a.R for a in attrs], 0.4, color=("C0", "C1")[i], label=label)
         print(f"example {label}: S/N {src.snr:.0f}, R", {a.name: round(a.R, 2) for a in attrs})
-    bar_ax.set(xticks=x, ylabel="$R$ (prior share)", ylim=(0, 1.05), title="feature level")
+    bar_ax.set(xticks=x, ylabel="$R$ (prior share)", ylim=(0, 1.3), yticks=np.linspace(0, 1, 6), title="feature level")
     bar_ax.set_xticklabels([LABELS[f] for f in NAMES])
-    bar_ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(0, 0.92))
+    bar_ax.legend(frameon=False, loc="upper center", ncol=2, handlelength=1.2, columnspacing=1.0, borderaxespad=0.3)
+    _grid(bar_ax, "y")
     print("example source:", source_id)
     _save(fig, "fig_example")
 
@@ -188,6 +198,7 @@ def fig_tsens():
             axes[2].plot(*zip(*pts), ls=ls, marker="o", ms=2.5, lw=1.2, color=color, label=f"{label}, {mode}")
     t_ref = agree["t_ref"]
     for ax in axes:
+        _grid(ax)
         ax.axvline(t_ref, color="0.7", lw=0.8, zorder=0)
         ax.set(xscale="log", xlabel="diffusion time $t$")
     axes[0].set(ylabel="$R$ (prior share)", ylim=(-0.03, 1.05), title="prior share, full data")
