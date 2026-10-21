@@ -1,20 +1,98 @@
 # Results
 
-Two full runs so far. Run 2 is current. Run 1 used a fixed moment window whose feature
-gradients sat on background pixels, and its feature-level numbers are superseded. Its
-pixel-level (Phase A) results still hold, because the features do not affect the
-reconstructions or the pixel scores. Question numbers Q1–Q5 refer to `docs/PLAN.md` §7.
+Three full runs so far. Run 3 is current. Run 1 used a fixed moment window whose
+feature gradients sat on background pixels; run 2 fixed the features but used the
+first tuning grid (t = 0.2); run 3 uses the wider grid (t = 0.5), adds the Laplace
+feature posterior and the t-sensitivity run. Question numbers Q1–Q5 refer to
+`docs/PLAN.md` §7. Phase D uses 12 eval sources; masking and SNR use 3 noise draws, blur
+uses 2. Row counts match the design in every run: masking 2520, SNR 1512, blur 840,
+prior 2520.
 
-**Setup (both runs).** Tuned on the 8 dev sources: prior time t = 0.2, weight λ = 0.5,
-annealed from t = 2.0, 1500 Adam steps. Phase D uses 12 eval sources; masking and SNR use
-3 noise draws, blur uses 2. Row counts match the design: masking 2520, SNR 1512,
-blur 840, prior 2520.
+## Run 3: t = 0.5, Laplace diagnostics, t-sensitivity (current)
 
-## Run 2: adaptive moment windows (current)
-
-GPU, 2026-10-21, code at `2159018`. Phase B and Phase D were rerun; tuning and Phase A
-were reused from run 1. Raw outputs are in `results/`; run 1's are kept locally in
+GPU, 2026-10-21, code at `6b718d4` (analysis rerun locally with `93703da`). Tuning, Phase
+A, B and D and `t_sensitivity.py` were all rerun. Raw outputs are in `results/`; run 2's
+are kept locally in `results/run2_adaptive_window/`, run 1's in
 `results/run1_fixed_window/`.
+
+**Setup.** The wider grid picked t = 0.5, λ = 0.5, no annealing (score 0.391; with
+annealing 0.391 as well, t = 0.5 with λ = 1 0.398, t = 0.2 0.410; t = 1.0 is not in the
+top six). Larger t trades a little full-data accuracy for better masked reconstruction:
+from t = 0.1 to 0.5 the full-data error rises 0.306 → 0.329 and the half-masked error
+falls 0.535 → 0.453. The tuning score averages the two.
+
+### Summary
+
+1. **The feature ordering is robust to t; R's level is not.** Over t = 0.02–1.0 the
+   within-case ranking of features by R agrees with the tuned t at Spearman 0.93–1.00
+   for fixed reconstructions, and 0.86–1.00 when reconstructing again at each t (0.76 at
+   t = 0.02, where the reconstructions themselves change). R's level moves a lot
+   (concentration, full data: 0.75 at t = 0.02, 0.08 at t = 1.0). The information gain
+   moves little (flux 3.55 → 3.34 nats, concentration 2.20 → 1.98). **Claim the
+   ordering, and quote information gain as the absolute number.**
+2. **The Laplace σ_post fixes most of the overconfidence.** Fraction of errors within 1σ
+   (68 % if calibrated), masking, directional σ_local → Laplace σ_post: flux 32 → 49 %,
+   size 12 → 36 %, e1 46 → 60 %, e2 52 → 69 %, concentration 39 → 52 %, asymmetry
+   10 → 20 %, HF power 7 → 13 %. Median |error|/σ_post is 0.6–1.0 for ellipticity,
+   concentration and flux, but 2–4 for asymmetry and HF power: their remaining error is
+   the prior's bias, which a local Gaussian cannot capture.
+3. **The headline pattern repeats at t = 0.5.** Unmasked medians:
+
+   | | flux | size | e1 | e2 | conc | asym | hf_power |
+   |---|---|---|---|---|---|---|---|
+   | log10 `I_D` | 2.63 | 2.34 | 2.18 | 2.15 | 2.48 | 1.72 | 1.20 |
+   | κ | 0.09 | 0.16 | 0.17 | 0.20 | 0.39 | 0.47 | 0.80 |
+   | R | 0.01 | 0.04 | 0.11 | 0.08 | 0.12 | 0.43 | 0.86 |
+   | signed error (σ_pop) | +0.02 | +0.13 | 0.00 | −0.07 | −0.07 | −0.62 | −0.47 |
+   | σ_post / σ_pop | 0.03 | 0.11 | 0.27 | 0.30 | 0.13 | 0.24 | 0.14 |
+   | info gain (nats) | 3.41 | 2.25 | 1.33 | 1.23 | 2.04 | 1.42 | 1.96 |
+
+   Spearman(R, |bias|) across features 0.61; joint information gain 13.0 nats.
+   Information gain counts the prior's narrowing too: HF power is well determined
+   (2.0 nats) because the prior pins it (κ = 0.80), not the data. Read it with R.
+4. **Error prediction: comparable to the pixel score, not better.** At t = 0.5 the pixel
+   score saturates less, so it carries more signal. Spearman with |error|, R vs pixel:
+   masking flux 0.46 vs 0.30, e2 0.54 vs 0.45, concentration 0.37 vs 0.14, but e1 0.45
+   vs 0.54, asymmetry 0.47 vs 0.54, HF power 0.34 vs 0.59 (size 0.30 vs 0.34); noise
+   flux 0.86 vs 0.69, concentration 0.68 vs 0.58, size 0.74 vs 0.73, with the pixel
+   score ahead for e1, asymmetry and HF power. The feature level adds selectivity, a
+   per-feature data-only flag and calibrated widths rather than a better single error
+   predictor.
+
+### Details
+
+- **Pixel score.** The footprint is ≥ 95 % prior-dominated for all sources with
+  S/N ≤ 69 and largely data-dominated from S/N ≈ 94 (9 %); Spearman with S/N −0.95.
+  Median footprint ΔF with full data +34. Half-mask control: 30/36 masked halves
+  prior-dominated, 15/36 observed halves data-dominated (run 2: 33 and 9).
+- **Selectivity.** Paired Δlog10 `I_D`: brightest 75 % of flux masked, flux −0.26
+  (others ≥ −0.19); faintest 75 % masked, concentration −2.46, e1/e2 −2.03/−2.08, flux
+  −1.04. Core-vs-outer rank correlation of the feature orderings +0.18, −0.61, −0.68
+  at 25/50/75 % (run 2: −0.50, −0.79, −0.50). Within-source Spearman of `I_D` with flux
+  removed: half-plane −0.92, core −0.51, outer −0.97. Low-pass at 0.07 cycles/px:
+  HF power −0.91, e1/e2 −0.77/−0.79, asymmetry −0.47, size −0.18, concentration −0.14,
+  flux −0.01.
+- **Fully masked galaxy (75 % half-plane).** `I_D` falls 5.7–7.8 dex and R = 1 for
+  every feature except HF power (0.60; its `I_D` even rises by 0.51 dex). At t = 0.5
+  without annealing, the prior-only reconstruction collapses to a near single-pixel
+  spike (flux 1.1 against a true 12.4, size at the window floor), whose Fourier-based
+  HF gradient spreads into observed pixels. A degenerate case.
+- **Weak-support flag.** Median |error| flagged vs unflagged: flux 0.84 vs 0.04, size
+  0.40 vs 0.26, e1 0.47 vs 0.18, e2 0.64 vs 0.19, concentration 1.41 vs 0.20, asymmetry
+  1.00 vs 0.58, HF power 1.26 vs 0.54.
+- **Posterior correlations (full data).** flux–size 0.73, size–concentration −0.54,
+  asymmetry–HF power 0.41; ellipticity is nearly independent of the rest (|ρ| ≤ 0.1).
+  Median `neg_mode_share` 0.10 (flux), 0.13 (size), < 0.05 otherwise.
+- **Intervention.** Median S 0.01–0.09 σ_pop per doubling of λ; within-case
+  Spearman(R, S) +0.09. Still a weak validator.
+- **Errors against t** (reconstructed again at each t, full data) are stable except for
+  asymmetry, whose bias grows from 0.48σ at t = 0.02 to 0.70σ at t = 0.2–1.0.
+
+## Run 2: adaptive moment windows, t = 0.2 (superseded by run 3)
+
+GPU, 2026-10-21, code at `2159018`, with t = 0.2, λ = 0.5, annealed from t = 2.0 (the
+first tuning grid). Phase B and Phase D were rerun; tuning and Phase A were reused from
+run 1. Raw outputs are kept locally in `results/run2_adaptive_window/`.
 
 **What changed.** Moments use an HSM-style adaptive elliptical Gaussian window, flux is
 the adaptive flux, and asymmetry is measured about the adaptive centre in a window twice
@@ -175,13 +253,12 @@ scale with source extent.
 
 1. ~~Redefine the weak-support flag on data curvature alone.~~ Done (Q2).
 2. Feature-level t-sensitivity: attribution at fixed reconstructions for several t.
-   Implemented in `experiments/t_sensitivity.py`; to run. The tuning grid now extends to
+   Done in run 3 (`experiments/t_sensitivity.py`). The tuning grid now extends to
    t = 1.0 (run 1 chose t = 0.2 at the old grid's edge).
 2b. Feature-space Laplace diagnostics (the abstract's "full local curvature" and
    "posterior information gain"): posterior std, cross-feature posterior correlations,
    information gain and KL against the population distribution of features, and calibration against
-   the actual errors. Implemented in `src/provenance/laplace.py`, written by Phase D;
-   to run.
+   the actual errors. Done in run 3 (`src/provenance/laplace.py`).
 3. ~~`analyze.py`: within-source severity correlations, κ and signed bias per feature,
    error-prediction figure.~~ Done: `analysis.json` now has `baseline_full_data`,
    paired `I_D` changes, `masking_selectivity` (rank correlation of the core and outer
