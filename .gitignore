@@ -6,3 +6,4 @@ data/*.pkl
 results/
 docs/*.pdf
 .DS_Store
+docs/writeup/
