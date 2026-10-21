@@ -53,6 +53,7 @@ Quick-mode numbers are for catching crashes only, not results.
 | 4 | `uv run python experiments/phase_d.py {masking,snr,blur,prior}` | Experiments 1–3 and the prior-strength intervention (C2), with the directional (C1) and Laplace feature-space diagnostics for every case. |
 | 4b | `uv run python experiments/t_sensitivity.py` | Feature-level attribution at t from 0.02 to 1.0, at fixed reconstructions and refitted, for 5 degradations × 12 sources. Independent of step 4. |
 | 5 | `uv run python experiments/analyze.py` | Figures and `results/analysis.json` from whichever step-4 outputs exist. |
+| 6 | `uv run python experiments/paper_figures.py` | Publication figures for the write-up in `results/paper/` (re-runs the two cases of the example figure). |
 
 On a 12-core CPU a fit takes ~2.5 s (1500 sequential Adam steps) and an exact 1024×1024
 F_P another ~1.5 s, which puts steps 3–4 at roughly 1–2 h in total. On a GPU the exact

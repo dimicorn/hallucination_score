@@ -289,7 +289,7 @@ def main():
         summary["masking_response"] = response(m, "flux_removed", groups=("mask_kind",))
         summary["masking_paired_d_log10_I_D"] = paired_change(masking, masking.mask_kind == "none", ["mask_kind", "mask_fraction"])
         summary["masking_selectivity"] = mask_selectivity(masking)
-        summary["masking_error_prediction"] = error_prediction(m)
+        summary["masking_error_prediction"] = error_prediction(masking)  # each case once (m repeats the unmasked ones)
         curves(m, "mask_fraction", "mask_kind", results_dir() / "fig_masking.png", "Experiment 1: progressive masking (median, 16-84% over sources x noise draws)")
     if snr is not None:
         summary["snr_response"] = response(snr, "noise_scale")

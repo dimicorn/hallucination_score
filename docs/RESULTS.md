@@ -50,12 +50,13 @@ sources.
    background flux, so the halo hypothesis from run 1 no longer needs testing.
 4. **Feature-level R predicts feature errors better than the pixel score, for most
    features.** Spearman with |error|, R against pixel fraction:
-   - masking: flux 0.45 vs 0.32, size 0.35 vs 0.27, e2 0.63 vs 0.47, concentration
-     0.35 vs 0.12
+   - masking: flux 0.44 vs 0.25, size 0.29 vs 0.16, e2 0.59 vs 0.42, concentration
+     0.34 vs 0.05 (six of seven features; recomputed with each case counted once, the
+     first version counted the unmasked cases three times)
    - SNR: flux 0.83 vs 0.64, size 0.78 vs 0.62, concentration 0.77 vs 0.57
-   - Asymmetry is the exception: the pixel score does better (masking 0.42 vs 0.32,
+   - Asymmetry is the exception: the pixel score does better (masking 0.35 vs 0.26,
      SNR 0.54 vs 0.41). For hf_power the two are comparable (R is better under masking,
-     0.54 vs 0.45; the pixel score is slightly better under SNR, 0.57 vs 0.53).
+     0.48 vs 0.36; the pixel score is slightly better under SNR, 0.57 vs 0.53).
 
 ### Q1: Response to removing information
 
