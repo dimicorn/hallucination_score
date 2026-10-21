@@ -9,7 +9,7 @@ Research code: feature-level prior/data attribution for galaxy image reconstruct
 ```bash
 uv sync                                   # CPU env; Python 3.12 only
 scripts/fetch_data.sh                     # downloads data/hsc_9697_72_subset.pkl (checksum-verified; not committed)
-uv run pytest                             # unit tests, ~5 s, no data file needed
+uv run pytest                             # unit tests, ~30 s (test_laplace builds a dense prior curvature), no data file needed
 uv run pytest tests/test_core.py::test_adjoint   # single test
 ```
 
@@ -17,11 +17,12 @@ uv run pytest tests/test_core.py::test_adjoint   # single test
 
 No linter or formatter is configured.
 
-Experiments (writes to `results/`, git-ignored). Every script takes `--quick` (1 source, 1 seed, 200-step fits), which writes to `results/quick/` and never touches real results. Use it to check that changes run end to end (~2 min on CPU); quick-mode numbers are not results.
+Experiments (writes to `results/`, git-ignored). Every script takes `--quick` (1 source, 1 seed, 200-step fits), which writes to `results/quick/` and never touches real results. Use it to check that changes run end to end (~12 min on a laptop CPU, mostly the dense curvature matrices of the Laplace step); quick-mode numbers are not results.
 
 ```bash
 for s in tune_prior phase_b_features phase_a_baseline; do uv run python experiments/$s.py --quick; done
 for e in masking snr blur prior; do uv run python experiments/phase_d.py $e --quick; done
+uv run python experiments/t_sensitivity.py --quick
 uv run python experiments/analyze.py --quick
 ```
 
@@ -29,6 +30,7 @@ Full runs go in the same order without `--quick`. The order matters because of f
 - `tune_prior.py` writes `tune_prior.json`; `Config.load()` reads it (otherwise falls back to provisional defaults in `pipeline.Config`).
 - `phase_b_features.py` writes `feature_population.json`; `evaluate.population_std()` needs it, so `phase_d.py` fails without it.
 - `analyze.py` reads whichever `phase_d_*.csv` exist.
+- `t_sensitivity.py` needs `tune_prior.json` and `feature_population.json`, and is independent of Phase D.
 
 GPU: on x86-64 Linux the default `uv sync` already installs the CUDA jaxlib; macOS gets CPU. On glibc ≥ 2.41 a `cannot enable executable stack` ImportError means jaxlib was (re)installed and `uv run python scripts/clear_execstack.py` needs running (see README).
 
@@ -52,4 +54,5 @@ Key points that are spread across files:
 - **Diffusion time t matters.** t = 0 is outside the trained regime, and by Tweedie's identity directional prior curvature is capped at about `1/s_t²` (`ScorePrior.curvature_cap_matvec`). That is why attribution reports `κ = I_P / I_cap` and absolute `I_D` next to the ratio `R`. `map_estimate` can anneal t coarse-to-fine (`anneal_from`) before holding it at `prior.t`.
 - **Reconstruction** is projected Adam on the score (there is no prior log-density value), with `x ≥ 0` enforced by clipping, all inside one `eqx.filter_jit` + `lax.scan`.
 - **Features** (`features.py`) are differentiable JAX functions of the image, built on an adaptive elliptical Gaussian window (fixed-point iteration unrolled `N_ITER` times, so gradients include the window's dependence on x). Use the jitted `features.FEATURES` / `features.GRADIENTS`; calling the raw functions un-jitted retraces the loop (~2 s per call). What matters for the attribution is where a feature's gradient lives, since that is the direction `v` along which `I_D`/`I_P` are measured: a fixed wide window once put almost all of it on background pixels (see `docs/RESULTS.md`), and `test_feature_gradients_follow_the_source` guards against that. Flux, size and hf_power are strongly correlated.
+- **Laplace diagnostics** (`laplace.py`) work on the dense 1024×1024 `F_D` and symmetrised `F_P`, which `evaluate` builds once per case and shares with the pixel scores. Negative eigenvalues of the learned `F_P` are dropped (positive part F_P⁺, H = F_D + F_P⁺ + εI); `neg_mode_share` says how much of the prior's curvature along a feature was dropped, and analyses should leave out cases where it is large. Don't invert H and F_P separately through |λ| (it let data *increase* a variance) and don't measure information gain against the prior-only local Gaussian (it's improper, so the gain just tracks ε); gains are against the population of features. Asymmetry is quadratic in x − R180·x, so for near-symmetric reconstructions its gradient and linearised `sigma_post` go to 0: treat its Laplace numbers with care.
 - **Data split.** `data.split` gives 8 dev sources (used only by `tune_prior.py`) and the rest as eval. Keep tuning on dev only.

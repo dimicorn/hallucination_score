@@ -11,7 +11,7 @@ The research plan is in [`docs/PLAN.md`](docs/PLAN.md).
 ```bash
 uv sync                      # jax 0.4.18, equinox 0.10.7, galaxygrad 0.0.19
 scripts/fetch_data.sh        # HSC tract 9697 / patch 72 source subset -> data/
-uv run pytest                # fast unit tests (~5 s)
+uv run pytest                # unit tests (~30 s; one builds the dense prior curvature)
 ```
 
 The pins are deliberate: the galaxygrad 0.0.19 checkpoints deserialise with
@@ -34,11 +34,12 @@ Run in this order; everything writes to `results/` (git-ignored).
 
 **Smoke test first.** Every script accepts `--quick` (1 source, 1 seed, 200-step fits,
 few probes) and writes to `results/quick/` instead, so it never touches real results.
-The whole chain takes about 2 minutes on CPU:
+The whole chain takes about 12 minutes on a laptop CPU (the dense curvature matrices dominate):
 
 ```bash
 for s in tune_prior phase_b_features phase_a_baseline; do uv run python experiments/$s.py --quick; done
 for e in masking snr blur prior; do uv run python experiments/phase_d.py $e --quick; done
+uv run python experiments/t_sensitivity.py --quick
 uv run python experiments/analyze.py --quick
 ```
 
@@ -46,10 +47,11 @@ Quick-mode numbers are for catching crashes only, not results.
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `uv run python experiments/tune_prior.py` | Picks prior time `t`, weight `λ`, annealing on the **dev** split (21 settings × 16 fits). Later steps read `results/tune_prior.json`. |
-| 2 | `uv run python experiments/phase_b_features.py` | Feature distributions on clean truths and autodiff-vs-finite-difference checks; writes the population scales used by step 4 (seconds). |
+| 1 | `uv run python experiments/tune_prior.py` | Picks prior time `t`, weight `λ`, annealing on the **dev** split (29 settings × 16 fits, t up to 1.0). Later steps read `results/tune_prior.json`. |
+| 2 | `uv run python experiments/phase_b_features.py` | Feature distributions on clean truths and autodiff-vs-finite-difference checks; writes the population mean, spread and covariance used by step 4 (seconds). |
 | 3 | `uv run python experiments/phase_a_baseline.py` | Pixel-level baseline: half-mask control (12 sources × 3 noise draws), exact-vs-Hutchinson convergence, F_P properties, t-sensitivity. |
-| 4 | `uv run python experiments/phase_d.py {masking,snr,blur,prior}` | Experiments 1–3 and the prior-strength intervention (C2). |
+| 4 | `uv run python experiments/phase_d.py {masking,snr,blur,prior}` | Experiments 1–3 and the prior-strength intervention (C2), with the directional (C1) and Laplace feature-space diagnostics for every case. |
+| 4b | `uv run python experiments/t_sensitivity.py` | Feature-level attribution at t from 0.02 to 1.0, at fixed reconstructions and refitted, for 5 degradations × 12 sources. Independent of step 4. |
 | 5 | `uv run python experiments/analyze.py` | Figures and `results/analysis.json` from whichever step-4 outputs exist. |
 
 On a 12-core CPU a fit takes ~2.5 s (1500 sequential Adam steps) and an exact 1024×1024
@@ -68,9 +70,11 @@ src/provenance/
   reconstruct.py  projected-Adam MAP with coarse-to-fine annealing of the prior's t
   features.py     flux, size, e1, e2, concentration, asymmetry, high-frequency power
   attribution.py  pixel ΔF; feature-level C1 diagnostic (I_D, I_P, R, D, κ, flags)
+  laplace.py      feature-space Laplace posterior: sigma_post, information gain, KL, correlations
   evaluate.py     per-case evaluation shared by the experiments
 experiments/      drivers for the plan's phases (see table above)
-tests/            unit tests: adjoint, exact F_D, null space, Hutchinson, features, prior
+tests/            unit tests: adjoint, exact F_D, null space, Hutchinson, features, prior,
+                  attribution flag, Laplace diagnostics, analysis helpers
 ```
 
 ## Setup decisions and findings so far

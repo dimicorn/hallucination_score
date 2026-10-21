@@ -112,3 +112,20 @@ def test_low_support_check_splits_errors_by_flag():
     assert out["flux"]["frac_flagged"] == pytest.approx(0.5)
     assert out["flux"]["median_abs_error_flagged"] == pytest.approx(2.5)
     assert out["flux"]["median_abs_error_unflagged"] == pytest.approx(0.15)
+
+
+def test_calibration_counts_errors_within_one_sigma():
+    """Errors of 0.5, 1.5, 2.5 and 3.5 against sigma_post = 2 (pop. std 1): half of the
+    cases fall within 1 sigma. Cases dominated by negative-curvature modes are left out."""
+    rows = []
+    for i, err in enumerate([0.5, 1.5, 2.5, 3.5, 0.1]):
+        for row in _rows(source=str(i), seed=0):
+            row.update(error_std_units=err, sigma_post=2.0, neg_mode_share=0.9 if i == 4 else 0.0)
+            rows.append(row)
+    df = _prepare(pd.DataFrame(rows))
+    df["sigma_post_rel"] = df["sigma_post"]
+    df["sigma_local_rel"] = df["sigma_local"]
+    out = analyze.calibration({"masking": df})
+    assert out["masking"]["frac_cases_used"] == pytest.approx(0.8)
+    assert out["masking"]["flux"]["sigma_post_coverage_1sigma"] == pytest.approx(0.5)
+    assert out["masking"]["flux"]["sigma_post_median_z"] == pytest.approx(1.0)

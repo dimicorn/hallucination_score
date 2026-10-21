@@ -174,6 +174,13 @@ scale with source extent.
 
 1. ~~Redefine the weak-support flag on data curvature alone.~~ Done (Q2).
 2. Feature-level t-sensitivity: attribution at fixed reconstructions for several t.
+   Implemented in `experiments/t_sensitivity.py`; to run. The tuning grid now extends to
+   t = 1.0 (run 1 chose t = 0.2 at the old grid's edge).
+2b. Feature-space Laplace diagnostics (the abstract's "full local curvature" and
+   "posterior information gain"): posterior std, cross-feature posterior correlations,
+   information gain and KL against the population distribution of features, and calibration against
+   the actual errors. Implemented in `src/provenance/laplace.py`, written by Phase D;
+   to run.
 3. ~~`analyze.py`: within-source severity correlations, κ and signed bias per feature,
    error-prediction figure.~~ Done: `analysis.json` now has `baseline_full_data`,
    paired `I_D` changes, `masking_selectivity` (rank correlation of the core and outer

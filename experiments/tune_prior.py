@@ -11,7 +11,8 @@ import numpy as np
 from provenance import data, forward
 from provenance.pipeline import QUICK_STEPS, Config, is_quick, parse_args, run_case, save_json
 
-GRID = {"prior_t": [0.0, 0.01, 0.05, 0.1, 0.2], "prior_weight": [0.0, 0.5, 1.0], "anneal_from": [None, 2.0]}
+# t = 0.2 won the first grid at its edge, hence 0.5 and 1.0
+GRID = {"prior_t": [0.0, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0], "prior_weight": [0.0, 0.5, 1.0], "anneal_from": [None, 2.0]}
 QUICK_GRID = {"prior_t": [0.0, 0.05], "prior_weight": [0.0, 1.0], "anneal_from": [None, 2.0]}
 MASKS = {"full": None, "half": forward.half_plane_mask((32, 32), 0.5)}
 

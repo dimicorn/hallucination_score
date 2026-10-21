@@ -1,8 +1,9 @@
 """Phase B: feature distributions on the clean reference (truth) images.
 
-Saves the population mean/std of every feature (used to put feature-level diagnostics
-on a common scale) and checks each autodiff gradient against central finite
-differences on a few real galaxies.
+Saves the population mean/std and covariance of the features (used to put feature-level
+diagnostics on a common scale, and as the feature prior in the information gain) and
+checks each autodiff gradient against central finite differences on a few real
+galaxies.
 """
 
 import jax
@@ -40,7 +41,11 @@ def main():
         checks[name] = float(np.median([gradient_check(jnp.asarray(s.truth, jnp.float32), f, seed=i) for i, s in enumerate(sources[:10])]))
 
     corr = table[list(features.NAMES)].corr(method="spearman")
-    save_json({"n_sources": len(sources), "population": stats, "gradient_check_median_relerr": checks, "spearman_corr": corr.round(3).to_dict()}, "feature_population.json")
+    cov = table[list(features.NAMES)].cov()  # used by the Laplace information gain
+    save_json(
+        {"n_sources": len(sources), "population": stats, "covariance": cov.to_dict(), "gradient_check_median_relerr": checks, "spearman_corr": corr.round(3).to_dict()},
+        "feature_population.json",
+    )
     table.to_csv(results_dir() / "feature_reference_table.csv", index=False)
 
     fig, axes = plt.subplots(1, len(features.NAMES) + 1, figsize=(22, 3))

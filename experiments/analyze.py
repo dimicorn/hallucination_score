@@ -14,6 +14,11 @@ Q4  What the feature level adds: core and outer masks remove information from
     number; per-feature baseline attribution and bias with full data.
 Q5  Agreement with the intervention diagnostic: rho(R, prior sensitivity S).
 
+Laplace (feature-space) quantities, when the CSVs have them: information gain in nats,
+the posterior std sigma_post, and its calibration against the actual errors (how often
+|error| <= 1 sigma, against 68 % for a calibrated Gaussian), next to the directional
+sigma_local.
+
 The low-support flag is recomputed here from I_D and the population spread rather than
 read from the CSV, so results written before the flag changed are analysed the same way.
 """
@@ -43,7 +48,14 @@ def _load(name, pop_std):
         df["sigma_data"] = np.where(df["I_D"] > 0, grad_norm / np.sqrt(df["I_D"].clip(lower=1e-300)), np.inf)
     df["sigma_data_rel"] = df["sigma_data"] / df["feature"].map(pop_std)
     df["low_support"] = (df["sigma_data_rel"] > 1) | df["flags"].str.contains("near_zero_total")
+    if "sigma_post" in df:
+        df["sigma_post_rel"] = df["sigma_post"] / df["feature"].map(pop_std)
+        df["sigma_local_rel"] = df["sigma_local"] / df["feature"].map(pop_std)
     return df
+
+
+def _has_laplace(df):
+    return "sigma_post" in df
 
 
 def _rho(x, y):
@@ -80,7 +92,7 @@ def response(df, severity, groups=()):
         per_source = sub.groupby("source")
         out[key] = {
             f"rho_severity_{d}": _median([_rho(g[severity].values, g[d].values) for _, g in per_source])
-            for d in ("log10_I_D", "R", "abs_error")
+            for d in ("log10_I_D", "R", "abs_error") + (("info_gain_pop",) if _has_laplace(sub) else ())
         }
         out[key]["frac_low_support"] = float(sub["low_support"].mean())
     return out
@@ -95,9 +107,15 @@ def paired_change(df, is_base, index):
 def baseline(df):
     """Per-feature attribution and error with full data at native noise."""
     cols = ["log10_I_D", "kappa", "R", "sigma_data_rel", "error_std_units", "abs_error"]
+    if _has_laplace(df):
+        cols += ["sigma_post_rel", "info_gain_pop", "kl_post_pop", "neg_mode_share"]
     med = df.groupby("feature")[cols].median().loc[list(NAMES)]
     out = {feat: row.round(4).to_dict() for feat, row in med.iterrows()}
     out["rho_R_vs_abs_bias_across_features"] = _rho(med["R"].values, med["error_std_units"].abs().values)
+    if _has_laplace(df):
+        corr = df.groupby("feature")[[f"corr_post_{n}" for n in NAMES]].median().loc[list(NAMES)]
+        out["posterior_correlation"] = {a: {b: round(float(corr.loc[a, f"corr_post_{b}"]), 3) for b in NAMES} for a in NAMES}
+        out["info_gain_pop_joint"] = float(df.drop_duplicates(["source", "seed"])["info_gain_pop_joint"].median())
     return out
 
 
@@ -111,6 +129,32 @@ def error_prediction(df):
             "rho_sigma_data_abs_error": _rho(np.log10(sub["sigma_data"].values), sub["abs_error"].values),
             "rho_pixel_frac_abs_error": _rho(sub["pixel_frac_prior_footprint"].values, sub["abs_error"].values) if "pixel_frac_prior_footprint" in sub else np.nan,
         }
+        if _has_laplace(sub):
+            out[feat]["rho_sigma_post_abs_error"] = _rho(np.log10(sub["sigma_post"].values), sub["abs_error"].values)
+            out[feat]["rho_info_gain_pop_abs_error"] = _rho(sub["info_gain_pop"].values, sub["abs_error"].values)
+    return out
+
+
+def calibration(dfs, max_neg_share=0.1):
+    """Are the local uncertainties honest? Per feature and experiment: the fraction of
+    cases with |error| <= sigma (0.68 for a calibrated Gaussian) and the median
+    |error| / sigma, for the directional sigma_local and the Laplace sigma_post. Cases
+    whose posterior variance comes mostly from negative-curvature modes are left out."""
+    out = {}
+    for name, df in dfs.items():
+        if not _has_laplace(df):
+            continue
+        ok = df[df["neg_mode_share"] <= max_neg_share]
+        out[name] = {"frac_cases_used": float(len(ok) / len(df))}
+        for feat, sub in ok.groupby("feature"):
+            out[name][feat] = {
+                f"{which}_{stat}": val
+                for which in ("sigma_local", "sigma_post")
+                for stat, val in (
+                    ("coverage_1sigma", float(np.mean(sub["abs_error"] <= sub[f"{which}_rel"]))),
+                    ("median_z", float(np.median(sub["abs_error"] / sub[f"{which}_rel"]))),
+                )
+            }
     return out
 
 
@@ -259,6 +303,7 @@ def main():
     sweeps = {k: v for k, v in (("masking", masking), ("snr", snr), ("blur", blur)) if v is not None}
     if sweeps:
         summary["low_support_check"] = low_support_check(sweeps.values())
+        summary["calibration"] = calibration(sweeps)
         plot_error_prediction(sweeps, results_dir() / "fig_error_prediction.png")
     if prior is not None:
         summary["intervention"], piv = intervention(prior, pop_std)

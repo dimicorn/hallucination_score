@@ -34,14 +34,20 @@ import numpy as np
 from . import curvature, features
 
 
-def pixel_scores(obs, prior, x, n_probes=1024, key=None, exact=False):
-    """Return dict with diag_D, diag_P and delta = diag_P - diag_D."""
-    if obs.blur_cutoff is None:
+def pixel_scores(obs, prior, x, n_probes=1024, key=None, exact=False, dense=None):
+    """Return dict with diag_D, diag_P and delta = diag_P - diag_D.
+
+    ``dense`` = (F_D, F_P) as already-built dense matrices (implies exact)."""
+    if dense is not None:
+        diag_d = np.diag(dense[0]).reshape(x.shape)
+    elif obs.blur_cutoff is None:
         diag_d = np.asarray(obs.curvature_diag())
     else:
         diag_d = np.diag(curvature.exact_matrix(obs.curvature_matvec, x.shape)).reshape(x.shape)
     mv_p = lambda v: prior.curvature_matvec(x, v)
-    if exact:
+    if dense is not None:
+        diag_p = np.diag(dense[1]).reshape(x.shape)
+    elif exact:
         diag_p = np.diag(curvature.exact_matrix(mv_p, x.shape)).reshape(x.shape)
     else:
         key = jax.random.PRNGKey(0) if key is None else key
@@ -116,7 +122,7 @@ def feature_attribution(obs, prior, x, population_std=None, rel_tol=1e-6):
     for name, f in features.FEATURES.items():
         g = features.GRADIENTS[name](x)
         gn = float(jnp.linalg.norm(g))
-        v = g / gn
+        v = g / gn if gn > 0 else g  # zero gradient (e.g. asymmetry of a symmetric image): flagged near_zero_total
         i_d = curvature.quadratic_form(obs.curvature_matvec, v)
         i_p = curvature.quadratic_form(lambda u: prior.curvature_matvec(x, u), v)
         i_cap = curvature.quadratic_form(lambda u: prior.curvature_cap_matvec(x, u), v)
