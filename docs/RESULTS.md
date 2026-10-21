@@ -99,9 +99,24 @@ R now separates the regimes: with no data (75 % half-plane), R = 1.00 while κ s
 compares σ_local = ‖g‖/√(`I_P` + `I_D`) with the population spread, and the prior's
 curvature alone keeps σ_local below that spread even with no data. With no data, flux
 has σ_local = 0.04σ_pop while its actual error is about 0.6σ_pop. **When the prior
-dominates, local curvature is badly overconfident.** A flag based on the data alone
-(‖g‖/√`I_D` against the population spread) would separate "weakly constrained by the data"
-from "confidently held by the prior".
+dominates, local curvature is badly overconfident.**
+
+**Fix (applied after run 2).** The flag now uses the data alone: a feature is weakly
+constrained when σ_data = ‖g‖/√`I_D` exceeds the population spread. `analyze.py`
+recomputes it from the existing columns, so run 2 was reanalysed without a rerun.
+- **What it flags.** With full data it flags almost nothing (asymmetry 3 %). With the
+  galaxy fully masked, it flags 92–100 % of every feature. Under noise and blur, it flags
+  ellipticity, asymmetry and hf_power first (e.g. e1: 28 % at noise ×2, 86 % at ×16).
+- **Flagged rows have larger errors for every feature.** Median |error| across masking,
+  SNR and blur, flagged vs unflagged (in σ_pop):
+
+  | | flux | size | e1 | e2 | conc | asym | hf_power |
+  |---|---|---|---|---|---|---|---|
+  | flagged | 0.71 | 0.76 | 0.50 | 0.67 | 1.10 | 0.70 | 1.10 |
+  | unflagged | 0.04 | 0.14 | 0.19 | 0.22 | 0.11 | 0.58 | 0.52 |
+
+  The gap is smallest for asymmetry, whose prior-driven bias is present even with full
+  data.
 
 Negative prior curvature now occurs in 0.6–0.8 % of rows (20/2520 in masking). These are
 flagged and excluded from R.
@@ -149,7 +164,7 @@ scale with source extent.
 |---|---|
 | Pixel-level baseline reproduced | Qualitatively; sign saturates for S/N ≲ 90 |
 | Interpretable feature set | Yes; gradients sit on the source (except concentration's outer aperture) |
-| Defensible feature-level diagnostic | R and κ yes; σ_local is overconfident when the prior dominates |
+| Defensible feature-level diagnostic | R and κ yes; σ_local is overconfident when the prior dominates, so low support is now judged by σ_data |
 | Masking and S/N experiments | Done |
 | Quantitative response to information removal | Yes, and selective across features (core vs outer, blur) |
 | Comparison with the pixel baseline | Yes: different rankings per feature, better error prediction |
@@ -157,10 +172,13 @@ scale with source extent.
 
 ### Next steps
 
-1. Redefine the weak-support flag on data curvature alone (‖g‖/√`I_D`).
+1. ~~Redefine the weak-support flag on data curvature alone.~~ Done (Q2).
 2. Feature-level t-sensitivity: attribution at fixed reconstructions for several t.
-3. `analyze.py`: within-source severity correlations; report κ and signed bias per
-   feature; an S/N figure of R against error.
+3. ~~`analyze.py`: within-source severity correlations, κ and signed bias per feature,
+   error-prediction figure.~~ Done: `analysis.json` now has `baseline_full_data`,
+   paired `I_D` changes, `masking_selectivity` (rank correlation of the core and outer
+   feature orderings: −0.50, −0.79, −0.50 at 25/50/75 %) and `low_support_check`, plus
+   `fig_error_prediction.png`.
 4. A second prior for the intervention diagnostic, if one is available.
 5. Optionally, give concentration a smooth outer weight so that its gradient also stays
    on the source.

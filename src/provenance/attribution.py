@@ -9,11 +9,14 @@ gradient g_k at x_hat and unit direction v_k = g_k / ||g_k||,
     I_D = v^T F_D v >= 0,   I_P = v^T F_P v (any sign),
     R   = I_P / (I_P + I_D),   D = (I_P - I_D) / (I_P + I_D).
 
-R is only reported when I_P >= 0 and the total support is meaningful. To judge
-"meaningful" on a feature's own scale we convert the total curvature along v into a
-local feature std, sigma_loc = ||g|| / sqrt(I_P + I_D) (the std of phi_k along the
-line x_hat + a v under a Gaussian with that curvature), and flag the feature as weakly
-constrained when sigma_loc exceeds the feature's spread over the reference population.
+R is only reported when I_P >= 0 and the total curvature is not ~0. To put curvature
+on a feature's own scale we convert it into a local feature std along the line
+x_hat + a v: sigma_loc = ||g|| / sqrt(I_P + I_D) for the total curvature and
+sigma_data = ||g|| / sqrt(I_D) for the data alone. A feature is flagged weakly
+constrained when sigma_data exceeds its spread over the reference population, i.e. when
+the measurements alone do not pin it down better than knowing it is a galaxy. The flag
+uses the data curvature only: the learned prior's curvature keeps sigma_loc small even
+with no data at all, where the prior-dominated reconstruction can still be far off.
 This is a local sensitivity diagnostic, not a decomposition of the marginal information
 in phi_k (sigma_loc is a lower bound on the Laplace marginal std sqrt(g^T H^-1 g)).
 
@@ -74,6 +77,10 @@ class FeatureAttribution:
         return self.grad_norm / np.sqrt(self.total) if self.total > 0 else np.inf
 
     @property
+    def sigma_data(self):
+        return self.grad_norm / np.sqrt(self.I_D) if self.I_D > 0 else np.inf
+
+    @property
     def valid(self):
         """R and D are defined (weakly constrained features keep R, but are flagged)."""
         return not set(self.flags) & INVALIDATING_FLAGS
@@ -96,6 +103,7 @@ class FeatureAttribution:
             "kappa": self.kappa,
             "total": self.total,
             "sigma_local": self.sigma_local,
+            "sigma_data": self.sigma_data,
             "R": self.R,
             "D": self.D,
             "flags": ",".join(self.flags),
@@ -118,7 +126,7 @@ def feature_attribution(obs, prior, x, population_std=None, rel_tol=1e-6):
             fa.flags.append("negative_prior_curvature")
         if fa.total <= rel_tol * scale or fa.total <= 0:
             fa.flags.append("near_zero_total")
-        elif population_std is not None and fa.sigma_local > population_std[name]:
+        elif population_std is not None and fa.sigma_data > population_std[name]:
             fa.flags.append("weakly_constrained")
         out.append(fa)
     return out

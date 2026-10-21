@@ -13,6 +13,8 @@ uv run pytest                             # unit tests, ~5 s, no data file neede
 uv run pytest tests/test_core.py::test_adjoint   # single test
 ```
 
+`tests/test_analyze.py` loads `experiments/analyze.py` by file path (experiments aren't a package) and tests its helpers on small synthetic tables. `analyze.py` recomputes the low-support flag from `I_D` instead of trusting the CSV's `flags` column, so it can reanalyse results written by older code.
+
 No linter or formatter is configured.
 
 Experiments (writes to `results/`, git-ignored). Every script takes `--quick` (1 source, 1 seed, 200-step fits), which writes to `results/quick/` and never touches real results. Use it to check that changes run end to end (~2 min on CPU); quick-mode numbers are not results.

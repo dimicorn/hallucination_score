@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from provenance import curvature, features
+from provenance import attribution, curvature, features
 from provenance.forward import Observation, area_mask, half_plane_mask
 from provenance.prior import ScorePrior
 
@@ -137,3 +137,26 @@ def test_prior_curvature_below_smoothing_cap():
         i_p = curvature.quadratic_form(lambda u: prior.curvature_matvec(x, u), v)
         i_cap = curvature.quadratic_form(lambda u: prior.curvature_cap_matvec(x, u), v)
         assert i_p <= 1.1 * i_cap
+
+
+# population spread of each feature on the reference set (order of magnitude of the real values)
+POP_STD = {"flux": 15.0, "size": 1.0, "e1": 0.28, "e2": 0.26, "concentration": 0.045, "asymmetry": 0.039, "hf_power": 0.075}
+
+
+def test_weak_support_flag_uses_data_curvature_only():
+    """With no data every feature is flagged, although the prior's curvature alone keeps
+    sigma_local below the population spread; with native-like data none is."""
+    prior = ScorePrior(t=0.2, weight=0.5)
+    x = 0.8 * gaussian_galaxy(2.5, 2.0, theta=0.4)
+    no_data = Observation(gaussian_psf(), jnp.zeros((N, N), jnp.float32))
+    attrs = attribution.feature_attribution(no_data, prior, x, population_std=POP_STD)
+    for a in attrs:
+        assert a.I_D == 0 and a.sigma_data == np.inf, a.name
+        assert {"weakly_constrained", "near_zero_total"} & set(a.flags), a.name
+    held_by_prior = [a for a in attrs if a.I_P > 0]
+    assert held_by_prior and all(a.sigma_local < POP_STD[a.name] for a in held_by_prior)
+
+    data = Observation(gaussian_psf(), jnp.full((N, N), 850.0, jnp.float32))
+    for a in attribution.feature_attribution(data, prior, x, population_std=POP_STD):
+        assert "weakly_constrained" not in a.flags, a.name
+        assert a.sigma_data == pytest.approx(a.grad_norm / np.sqrt(a.I_D)), a.name
