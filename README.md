@@ -11,7 +11,7 @@ The research plan is in [`docs/PLAN.md`](docs/PLAN.md).
 ```bash
 uv sync                      # jax 0.4.18, equinox 0.10.7, galaxygrad 0.0.19
 scripts/fetch_data.sh        # HSC tract 9697 / patch 72 source subset -> data/
-uv run pytest                # unit tests (~30 s; one builds the dense prior curvature)
+uv run pytest                # unit tests (~100 s; some build dense prior curvatures)
 ```
 
 The pins are deliberate: the galaxygrad 0.0.19 checkpoints deserialise with
@@ -104,13 +104,18 @@ are still pending the full runs.
    (λ=0.5 with annealing for t>0). The likelihood-only fit gives 1.44 / 2.41.
 4. **The prior curvature is capped by t.** By Tweedie's second-order identity, for
    the VP score at time t, `−∇² log p_t = (I − a ∂D/∂u)/s_t²` with a PSD denoiser
-   Jacobian, so every directional prior curvature lies in `[~0, 1/s_t²]`. In a smoke
+   Jacobian, so for the exact smoothed prior every directional curvature in the network's
+   coordinates u is *at most* `1/s_t²` (an upper bound only; it can be negative between modes);
+   in image space the cap keeps the dominant Jacobian term. In a smoke
    test, I_P ≈ 2000–2200 for almost every feature and condition, which is about the
    cap at t = 0.05. Consequences: the sign of the pixel score ΔF (and the feature
    ratio R) can be moved by the choice of t alone, and at t = 0 the cap is infinite.
    The code therefore also reports `κ = I_P / I_cap` (how much of the cap the prior
    uses along a direction) and the absolute data support `I_D`. Phase A measures the
-   t-sensitivity directly. A unit test confirms the learned prior respects the cap.
+   t-sensitivity directly. The learned network does not respect the cap exactly: along a few
+   directions it exceeds it by 3–8 % at t = 0.5 (more at small t), which
+   `test_learned_prior_against_the_tweedie_ceiling` checks against a 10 % tolerance, so κ is a
+   heuristic normalisation rather than a bounded fraction.
 5. **Adaptive windowed moments.** Unweighted second moments were dominated by faint
    reconstructed halos (size 4.4 px vs 1.7 px true for one source). A fixed σ = 6 px
    window fixed that, but the first full run showed it put 95–99.5% of the gradient of

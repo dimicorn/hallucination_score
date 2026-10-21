@@ -12,6 +12,10 @@
    can be moved by t alone; this quantifies by how much.
 """
 
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
+
 import time
 
 import jax

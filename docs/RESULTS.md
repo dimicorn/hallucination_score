@@ -65,8 +65,8 @@ falls 0.535 → 0.453. The tuning score averages the two.
   S/N ≤ 69 and largely data-dominated from S/N ≈ 94 (9 %); Spearman with S/N −0.95.
   Median footprint ΔF with full data +34. Half-mask control: 30/36 masked halves
   prior-dominated, 15/36 observed halves data-dominated (run 2: 33 and 9).
-- **Selectivity.** Paired Δlog10 `I_D`: brightest 75 % of flux masked, flux −0.26
-  (others ≥ −0.19); faintest 75 % masked, concentration −2.46, e1/e2 −2.03/−2.08, flux
+- **Selectivity.** Paired Δlog10 `I_D`: core mask (central rings holding 75 % of the
+  reference flux), flux −0.26 (others ≥ −0.19); outer mask (outer rings, 75 %), concentration −2.46, e1/e2 −2.03/−2.08, flux
   −1.04. Core-vs-outer rank correlation of the feature orderings +0.18, −0.61, −0.68
   at 25/50/75 % (run 2: −0.50, −0.79, −0.50). Within-source Spearman of `I_D` with flux
   removed: half-plane −0.92, core −0.51, outer −0.97. Low-pass at 0.07 cycles/px:
@@ -418,7 +418,8 @@ half of the cases. Feature-level R for the unmasked case:
 | 0.35 | 0.30 | 0.32 | 0.30 | 0.28 | 0.92 | 0.27 |
 
 **The mechanism.**
-- The data constrain PSF-smooth combinations of pixels about 1/Σk² ≈ 28 times more
+- The data constrain PSF-smooth combinations of pixels up to 1/Σk² ≈ 20 times more (the
+  value for the HSC i-band PSF used; an earlier draft said 28, which was wrong)
   strongly than a single pixel. A smooth direction v has ‖W^½Av‖² ≈ w‖v‖², while the
   diagonal of F_D is w·Σk².
 - The prior's curvature, by contrast, is nearly isotropic.

@@ -8,17 +8,24 @@
 Several names run one after another (e.g. `phase_d.py masking snr`). Add --quick to
 any of them for a smoke test (1 source, 1 seed, short fits).
 
-Each writes results/phase_d_<name>.csv with one row per (case, feature).
+Each writes results/phase_d_<name>.csv with one row per (case, feature). Masking, SNR and
+low-pass cases also get I_D_fixed / cos_ref against the feature gradients of the
+undegraded reconstruction of the same source and noise draw.
 """
 
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
+
 import argparse
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 
-from provenance import data, forward
+from provenance import data, features, forward
 from provenance.evaluate import evaluate, population_std
-from provenance.pipeline import Config, is_quick, parse_args, results_dir
+from provenance.pipeline import Config, is_quick, parse_args, results_dir, run_case
 
 N_SOURCES = 12
 SHAPE = (32, 32)
@@ -41,6 +48,17 @@ def eval_sources():
     return ev[:: max(1, len(ev) // N_SOURCES)][:N_SOURCES]
 
 
+@lru_cache(maxsize=None)
+def _reference_fit(source_id, seed, cfg):
+    src = next(s for s in eval_sources() if s.source_id == source_id)
+    return features.gradients(run_case(src, cfg, seed=seed).x_hat)
+
+
+def reference_grads(src, cfg, seed):
+    """Feature gradients of the undegraded reconstruction (same source, noise draw)."""
+    return _reference_fit(src.source_id, seed, cfg)
+
+
 def masks_for(src):
     """(kind, nominal fraction, mask) for every masking condition of one source."""
     yield "none", 0.0, None
@@ -57,7 +75,7 @@ def run_masking(cfg, pop):
             flux_removed = 0.0 if mask is None else float((src.truth * (1 - mask)).sum() / src.truth.sum())
             for seed in SEEDS:
                 cond = {"experiment": "masking", "mask_kind": kind, "mask_fraction": frac, "flux_removed": flux_removed, "seed": seed}
-                rows += evaluate(src, cfg, pop, cond, mask=mask, seed=seed)[0]
+                rows += evaluate(src, cfg, pop, cond, mask=mask, seed=seed, ref_grads=reference_grads(src, cfg, seed))[0]
         print(src.source_id, flush=True)
     return rows
 
@@ -68,7 +86,7 @@ def run_snr(cfg, pop):
         for ns in NOISE_SCALES:
             for seed in SEEDS:
                 cond = {"experiment": "snr", "noise_scale": ns, "snr_effective": src.snr / ns, "seed": seed}
-                rows += evaluate(src, cfg, pop, cond, noise_scale=ns, seed=seed)[0]
+                rows += evaluate(src, cfg, pop, cond, noise_scale=ns, seed=seed, ref_grads=reference_grads(src, cfg, seed))[0]
         print(src.source_id, flush=True)
     return rows
 
@@ -79,7 +97,7 @@ def run_blur(cfg, pop):
         for cut in BLUR_CUTOFFS:
             for seed in BLUR_SEEDS:
                 cond = {"experiment": "blur", "blur_cutoff": np.inf if cut is None else cut, "seed": seed}
-                rows += evaluate(src, cfg, pop, cond, blur_cutoff=cut, seed=seed)[0]
+                rows += evaluate(src, cfg, pop, cond, blur_cutoff=cut, seed=seed, ref_grads=reference_grads(src, cfg, seed))[0]
         print(src.source_id, flush=True)
     return rows
 

@@ -22,11 +22,22 @@ with a = exp(-t/2), s^2 = 1 - exp(-t). Tweedie's second-order identity gives
 
     -Hess_u log p_t(u) = (I - a dD/du) / s^2,     D(u) = E[u_0 | u_t = u],
 
-and dD/du = a Cov[u_0 | u_t] / s^2 is PSD, so for the true smoothed prior every
-directional curvature lies in [~0, 1/s^2]: the prior can never look more constraining
-than the smoothing scale allows. ``curvature_cap_matvec`` is that 1/s^2 ceiling mapped
-to x-space (dominant term of the change of variables); I_P / I_cap is the fraction of
-the ceiling that the learned prior actually uses along a direction.
+and dD/du = a Cov[u_0 | u_t] / s^2 is PSD, so for the exact smoothed prior every
+directional curvature in u is at most 1/s^2. This is an upper bound only: between modes
+the curvature can be negative. In x the exact identity is
+
+    -Hess_x log p_x = lambda [J F_u J + diag(s_x,i / (1 + x_i))],   J = diag(T'(x)),
+
+with F_u = -Hess_u log p_t (unweighted) and s_x the unweighted x-space score.
+``curvature_cap_matvec`` is lambda J (I / s^2) J, i.e. it drops the second, score-
+dependent diagonal term (about 1 % of the cap at t = 0.5, mostly negative), so
+kappa = I_P / I_cap is a heuristic normalisation by the smoothing scale, not a bounded
+fraction. ``curvature_u_matvec`` gives F_u itself: the learned network exceeds the u-space
+ceiling by a few per cent along a handful of directions (largest eigenvalue of s^2 F_u
+about 1.03-1.06 on HSC reconstructions at t = 0.5), so kappa_u > 1 flags score error.
+
+The prior weight lambda multiplies the score, so F_P, I_P and the cap all include it and
+kappa does not depend on it.
 """
 
 from dataclasses import dataclass
@@ -67,6 +78,22 @@ class ScorePrior:
     def curvature_matvec(self, x, v):
         """F_P v = -J_s(x) v, one forward-mode pass through the network."""
         return -jax.jvp(self.score, (x,), (v,))[1]
+
+    def network_score(self, u, t=None):
+        """Unweighted score of p_t in the network's coordinates u = log(1 + x) / 0.1."""
+        return HSC_ScoreNet32(u[None].astype(jnp.float32), t=self.t if t is None else t)[0]
+
+    def curvature_u_matvec(self, x, w):
+        """F_u w = -d s_u / du w at u = T(x): the unweighted curvature that Tweedie bounds
+        by 1 / s^2."""
+        u = jnp.log1p(x) / SIGMA_U
+        return -jax.jvp(self.network_score, (u,), (w.astype(jnp.float32),))[1]
+
+    def kappa_u(self, x, v):
+        """s^2 (Jv)^T F_u (Jv) / ||Jv||^2: the share of the u-space Tweedie ceiling used
+        along the image direction v (<= 1 for an exact score)."""
+        jv = v / (SIGMA_U * (1 + x))
+        return float(self.sigma2 * jnp.vdot(jv, self.curvature_u_matvec(x, jv)) / jnp.vdot(jv, jv))
 
     def with_weight(self, weight):
         return ScorePrior(self.t, weight, self.jacobian_term)

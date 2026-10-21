@@ -150,17 +150,49 @@ def test_prior_curvature_is_score_jacobian():
     np.testing.assert_allclose(prior.curvature_matvec(x, v), fd, rtol=0.05, atol=0.05 * float(jnp.abs(fd).max()))
 
 
-def test_prior_curvature_below_smoothing_cap():
-    """Tweedie: for the true smoothed prior, v^T F_P v <= v^T F_cap v. Check the
-    learned prior respects this on a galaxy (up to small transform terms)."""
-    prior = ScorePrior(t=0.05)
+def _top_sym_eigenvalue(matvec, vjp, shape, n_iter=40, seed=0):
+    """Largest eigenvalue of sym(M) = (M + M^T) / 2 by power iteration (M not symmetric)."""
+    v = jax.random.normal(jax.random.PRNGKey(seed), shape)
+    v = v / jnp.linalg.norm(v)
+    lam = 0.0
+    for _ in range(n_iter):
+        w = 0.5 * (matvec(v) + vjp(v))
+        lam = float(jnp.vdot(v, w))
+        v = w / jnp.linalg.norm(w)
+    return lam
+
+
+def test_learned_prior_against_the_tweedie_ceiling():
+    """Tweedie: for the exact smoothed prior, s^2 F_u <= I in the network's coordinates u.
+    The learned network is close but not exact: at t = 0.5 the largest eigenvalue of
+    s^2 sym(F_u) is about 1.03-1.06 on HSC reconstructions and 1.08 on this synthetic
+    galaxy (1.18 at t = 0.05), so this checks the worst direction (power iteration, which
+    converges from below; random probes would average over the spectrum) against a stated
+    tolerance of 10 %."""
+    prior = ScorePrior(t=0.5)
     x = 0.8 * gaussian_galaxy(2.5, 2.0)
-    for k in jax.random.split(jax.random.PRNGKey(4), 4):
-        v = jax.random.normal(k, (N, N))
-        v = v / jnp.linalg.norm(v)
-        i_p = curvature.quadratic_form(lambda u: prior.curvature_matvec(x, u), v)
-        i_cap = curvature.quadratic_form(lambda u: prior.curvature_cap_matvec(x, u), v)
-        assert i_p <= 1.1 * i_cap
+    u = jnp.log1p(x) / 0.1
+    _, vjp_fn = jax.vjp(lambda uu: -prior.network_score(uu), u)
+    lam = _top_sym_eigenvalue(lambda w: prior.curvature_u_matvec(x, w), lambda w: vjp_fn(w)[0], (N, N))
+    assert 0.5 < prior.sigma2 * lam <= 1.10
+
+
+def test_kappa_u_close_to_image_space_kappa():
+    """At t = 0.5 the score-dependent diagonal term that the image-space cap omits is
+    ~1 % of the cap, so kappa (x-space) and kappa_u (u-space) agree closely."""
+    prior = ScorePrior(t=0.5, weight=0.5)
+    x = 0.8 * gaussian_galaxy(2.5, 2.0, theta=0.4)
+    obs = Observation(gaussian_psf(), jnp.full((N, N), 850.0, jnp.float32))
+    for a in attribution.feature_attribution(obs, prior, x, population_std=POP_STD):
+        if a.grad_norm > 0 and a.I_P > 0:
+            assert abs(a.kappa_u - a.kappa) < 0.05, a.name
+
+
+def test_diagonal_attribution():
+    v = np.array([1.0, 1.0, 0.0, 0.0]) / np.sqrt(2)
+    out = attribution.diagonal_attribution(np.array([3.0, 1.0, 5.0, 5.0]), np.array([1.0, 3.0, 0.0, 0.0]), v)
+    assert out["R_diag"] == pytest.approx(0.5)  # (1 + 3) / (4 + 4)
+    assert out["pixel_ratio_vw"] == pytest.approx(0.5)  # mean of 0.25 and 0.75
 
 
 # population spread of each feature on the reference set (order of magnitude of the real values)

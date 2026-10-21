@@ -20,19 +20,38 @@ the posterior std sigma_post, and its calibration against the actual errors (how
 sigma_local.
 
 The low-support flag is recomputed here from I_D and the population spread rather than
-read from the CSV, so results written before the flag changed are analysed the same way.
+read from the CSV, so results written before the flag changed are analysed the same way;
+with the null-space column it also covers features the data cannot see at all.
+
+Review additions: coverage at 50/68/90/95 % with median/NMAD of the signed z (bias vs width),
+with and without the negative-mode exclusion; error prediction against simple baselines
+(-log I_D, degradation strength, effective S/N, continuous pixel scores, the
+diagonal-curvature ratio R_diag) with partial correlations given strength and S/N;
+summaries of the new per-case columns (R_diag, R_eff, eta_null, widths without clipping or
+on free pixels, kappa_u, positivity bound) and the fixed-gradient selectivity. Intervals
+are 95 % galaxy-level bootstrap intervals (whole sources resampled), since noise draws and
+degradation levels of one galaxy are not independent.
 """
+
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
 
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
+from scipy.stats import rankdata, spearmanr
 
 import matplotlib.pyplot as plt
 from provenance.evaluate import population_std
+from provenance.laplace import NULL_DOMINATED
 from provenance.features import NAMES
 from provenance.pipeline import parse_args, results_dir, save_json
 
 EXPERIMENT_COLORS = {"masking": "C0", "snr": "C1", "blur": "C2"}
+N_BOOT = 200
+LEVELS = {"50": 0.6745, "68": 1.0, "90": 1.6449, "95": 1.9600}  # Gaussian z for central intervals
+SIGMAS = ("sigma_local", "sigma_post", "sigma_post_free", "sigma_post_raw")
+CONDITIONS = {"masking": ["mask_kind", "mask_fraction"], "snr": ["noise_scale"], "blur": ["blur_cutoff"]}
 
 
 def _load(name, pop_std):
@@ -48,9 +67,17 @@ def _load(name, pop_std):
         df["sigma_data"] = np.where(df["I_D"] > 0, grad_norm / np.sqrt(df["I_D"].clip(lower=1e-300)), np.inf)
     df["sigma_data_rel"] = df["sigma_data"] / df["feature"].map(pop_std)
     df["low_support"] = (df["sigma_data_rel"] > 1) | df["flags"].str.contains("near_zero_total")
-    if "sigma_post" in df:
-        df["sigma_post_rel"] = df["sigma_post"] / df["feature"].map(pop_std)
-        df["sigma_local_rel"] = df["sigma_local"] / df["feature"].map(pop_std)
+    if "eta_null" in df:
+        df["low_support"] |= df["eta_null"] > NULL_DOMINATED
+    for col in SIGMAS:
+        if col in df:
+            df[f"{col}_rel"] = df[col] / df["feature"].map(pop_std)
+    if "I_D_fixed" in df:
+        df["log10_I_D_fixed"] = np.log10(df["I_D_fixed"].clip(lower=1e-12))
+    # simple baselines: degradation strength and effective S/N
+    df["severity"] = {"masking": df.get("flux_removed"), "snr": df.get("noise_scale"), "blur": 1 / df["blur_cutoff"] if "blur_cutoff" in df else None}.get(name)
+    if "snr" in df:
+        df["snr_eff"] = df["snr"] / df["noise_scale"] if "noise_scale" in df else df["snr"]
     return df
 
 
@@ -72,14 +99,45 @@ def _median(values):
     return float(np.median(values)) if len(values) else np.nan
 
 
-def _paired(df, is_base):
-    """Rows not in the base condition, with d_log10_I_D against the base case of the
-    same source, noise draw and feature."""
+def _paired(df, is_base, col="log10_I_D"):
+    """Rows not in the base condition, with d_<col> against the base case of the same
+    source, noise draw and feature."""
     keys = ["source", "seed", "feature"]
-    base = df[is_base].set_index(keys)["log10_I_D"]
+    base = df[is_base].set_index(keys)[col]
     rest = df[~is_base].copy()
-    rest["d_log10_I_D"] = rest["log10_I_D"].values - base.reindex(pd.MultiIndex.from_frame(rest[keys])).values
+    rest[f"d_{col}"] = rest[col].values - base.reindex(pd.MultiIndex.from_frame(rest[keys])).values
     return rest
+
+
+def _boot_indices(sources, n_boot=N_BOOT, seed=0):
+    """Row indices of n_boot galaxy-level bootstrap resamples (whole sources resampled)."""
+    sources = np.asarray(sources)
+    groups = [np.flatnonzero(sources == s) for s in np.unique(sources)]
+    rng = np.random.default_rng(seed)
+    return [np.concatenate([groups[i] for i in rng.integers(len(groups), size=len(groups))]) for _ in range(n_boot)]
+
+
+def _with_ci(stat, boots, n):
+    """stat(all rows) with a 95 % galaxy-bootstrap interval; stat takes row indices."""
+    vals = np.array([stat(idx) for idx in boots], float)
+    vals = vals[np.isfinite(vals)]
+    lo, hi = np.percentile(vals, [2.5, 97.5]) if len(vals) else (np.nan, np.nan)
+    return {"value": float(stat(np.arange(n))), "ci95": [float(lo), float(hi)]}
+
+
+def _partial_rho(x, y, covariates):
+    """Spearman correlation of x and y after removing (linearly, on ranks) what the
+    covariates explain of each."""
+    cols = [np.asarray(c, float) for c in covariates]
+    ok = np.isfinite(x) & np.isfinite(y)
+    for c in cols:
+        ok &= np.isfinite(c)
+    if ok.sum() < 10 or np.ptp(x[ok]) == 0 or np.ptp(y[ok]) == 0:
+        return np.nan
+    z = np.column_stack([np.ones(ok.sum())] + [rankdata(c[ok]) for c in cols if np.ptp(c[ok]) > 0])
+    resid = lambda a: a - z @ np.linalg.lstsq(z, a, rcond=None)[0]
+    rx, ry = resid(rankdata(x[ok])), resid(rankdata(y[ok]))
+    return float(np.corrcoef(rx, ry)[0, 1]) if rx.std() > 0 and ry.std() > 0 else np.nan
 
 
 def response(df, severity, groups=()):
@@ -98,9 +156,9 @@ def response(df, severity, groups=()):
     return out
 
 
-def paired_change(df, is_base, index):
-    """Median paired change in log10 I_D against the undegraded case."""
-    tab = _paired(df, is_base).pivot_table(index=index, columns="feature", values="d_log10_I_D", aggfunc="median")
+def paired_change(df, is_base, index, col="log10_I_D"):
+    """Median paired change in log10 I_D (or another column) against the undegraded case."""
+    tab = _paired(df, is_base, col).pivot_table(index=index, columns="feature", values=f"d_{col}", aggfunc="median")
     return {"/".join(map(str, k if isinstance(k, tuple) else (k,))): row.round(3).to_dict() for k, row in tab[list(NAMES)].iterrows()}
 
 
@@ -119,42 +177,108 @@ def baseline(df):
     return out
 
 
-def error_prediction(df):
-    """Does the diagnostic flag the features that are reconstructed badly?"""
+PREDICTORS = {
+    "R": lambda d: d["R"],
+    "R_diag": lambda d: d["R_diag"],
+    "R_eff": lambda d: d["R_eff"],
+    "minus_log10_I_D": lambda d: -d["log10_I_D"],
+    "log10_sigma_data": lambda d: np.log10(d["sigma_data"]),
+    "log10_sigma_post": lambda d: np.log10(d["sigma_post"]),
+    "pixel_frac": lambda d: d["pixel_frac_prior_footprint"],
+    "pixel_median_dF": lambda d: d["pixel_median_dF_footprint"],
+    "pixel_ratio_footprint": lambda d: d["pixel_ratio_footprint"],
+    "pixel_ratio_vw": lambda d: d["pixel_ratio_vw"],
+    "severity": lambda d: d["severity"],
+    "minus_log10_snr_eff": lambda d: -np.log10(d["snr_eff"]),
+}
+
+
+def error_prediction(df, n_boot=N_BOOT):
+    """Does a diagnostic flag the features that are reconstructed badly, and does it add
+    anything beyond simple baselines? Per feature and predictor: Spearman correlation with
+    |error| (galaxy-bootstrap interval) and the partial correlation given degradation
+    strength and effective S/N."""
     out = {}
     for feat, sub in df.groupby("feature"):
-        out[feat] = {
-            "rho_R_abs_error": _rho(sub["R"].values, sub["abs_error"].values),
-            "rho_sigma_local_abs_error": _rho(np.log10(sub["sigma_local"].values), sub["abs_error"].values),
-            "rho_sigma_data_abs_error": _rho(np.log10(sub["sigma_data"].values), sub["abs_error"].values),
-            "rho_pixel_frac_abs_error": _rho(sub["pixel_frac_prior_footprint"].values, sub["abs_error"].values) if "pixel_frac_prior_footprint" in sub else np.nan,
-        }
-        if _has_laplace(sub):
-            out[feat]["rho_sigma_post_abs_error"] = _rho(np.log10(sub["sigma_post"].values), sub["abs_error"].values)
-            out[feat]["rho_info_gain_pop_abs_error"] = _rho(sub["info_gain_pop"].values, sub["abs_error"].values)
+        sub = sub.reset_index(drop=True)
+        y = sub["abs_error"].to_numpy(float)
+        boots = _boot_indices(sub["source"], n_boot)
+        covariates = [sub[c].to_numpy(float) for c in ("severity", "snr_eff") if c in sub and sub[c].notna().any()]
+        out[feat] = {}
+        for name, fn in PREDICTORS.items():
+            try:
+                x = np.asarray(fn(sub), float)
+            except KeyError:
+                continue
+            if not np.isfinite(x).any():
+                continue
+            out[feat][name] = {
+                "rho": _with_ci(lambda i: _rho(x[i], y[i]), boots, len(y)),
+                "partial_rho": _with_ci(lambda i: _partial_rho(x[i], y[i], [c[i] for c in covariates]), boots, len(y)),
+            }
     return out
 
 
-def calibration(dfs, max_neg_share=0.1):
-    """Are the local uncertainties honest? Per feature and experiment: the fraction of
-    cases with |error| <= sigma (0.68 for a calibrated Gaussian) and the median
-    |error| / sigma, for the directional sigma_local and the Laplace sigma_post. Cases
-    whose posterior variance comes mostly from negative-curvature modes are left out."""
+def calibration(dfs, max_neg_share=0.1, n_boot=N_BOOT):
+    """Are the local uncertainties honest? Per experiment, feature and width (directional
+    sigma_local, Laplace sigma_post, and if present the unclipped and free-pixel
+    variants): coverage of central Gaussian intervals at 50/68/90/95 % with galaxy-bootstrap
+    intervals, and the median and normalised MAD of the signed z = error / sigma
+    (median != 0: bias; NMAD > 1: widths too small; robust to the few degenerate cases). Computed with and without the cases whose prior
+    curvature along the feature was mostly negative (clipped)."""
     out = {}
     for name, df in dfs.items():
         if not _has_laplace(df):
             continue
-        ok = df[df["neg_mode_share"] <= max_neg_share]
-        out[name] = {"frac_cases_used": float(len(ok) / len(df))}
-        for feat, sub in ok.groupby("feature"):
-            out[name][feat] = {
-                f"{which}_{stat}": val
-                for which in ("sigma_local", "sigma_post")
-                for stat, val in (
-                    ("coverage_1sigma", float(np.mean(sub["abs_error"] <= sub[f"{which}_rel"]))),
-                    ("median_z", float(np.median(sub["abs_error"] / sub[f"{which}_rel"]))),
-                )
-            }
+        out[name] = {}
+        for subset, rows in (("excl_neg_modes", df[df["neg_mode_share"] <= max_neg_share]), ("all", df)):
+            res = {"frac_cases_used": float(len(rows) / len(df))}
+            for feat, sub in rows.groupby("feature"):
+                err = sub["error_std_units"].to_numpy(float)
+                boots = _boot_indices(sub["source"], n_boot)
+                res[feat] = {}
+                for which in SIGMAS:
+                    if f"{which}_rel" not in sub:
+                        continue
+                    z = err / sub[f"{which}_rel"].to_numpy(float)
+                    fin = np.isfinite(z)
+                    if not fin.any():
+                        continue
+                    for level, k in LEVELS.items():
+                        res[feat][f"{which}_coverage_{level}"] = _with_ci(lambda i: float(np.mean(np.abs(z[i][fin[i]]) <= k)) if fin[i].any() else np.nan, boots, len(z))
+                    # robust: a few degenerate (near-zero-gradient) cases have tiny sigma and huge |z|
+                    res[feat][f"{which}_median_z"] = float(np.median(z[fin]))
+                    res[feat][f"{which}_nmad_z"] = float(1.4826 * np.median(np.abs(z[fin] - np.median(z[fin]))))
+                    res[feat][f"{which}_median_abs_z"] = float(np.median(np.abs(z[fin])))
+            out[name][subset] = res
+    return out
+
+
+def new_diagnostics(dfs):
+    """Medians per condition of the per-case columns added for the review: the
+    diagonal-only ratio R_diag next to R, the precision share R_eff, the null-space share
+    eta_null and how often it dominates, the widths without clipping and on free pixels
+    relative to sigma_post, kappa_u - kappa, the positivity bound, and convergence."""
+    out = {}
+    for name, df in dfs.items():
+        if "eta_null" not in df:
+            continue
+        d = df.assign(
+            free_over_post=df["sigma_post_free"] / df["sigma_post"],
+            raw_over_post=df["sigma_post_raw"] / df["sigma_post"],
+            kappa_u_minus_kappa=df["kappa_u"] - df["kappa"],
+            null_dominated=(df["eta_null"] > NULL_DOMINATED).astype(float),
+        )
+        cols = ["R", "R_diag", "R_eff", "eta_null", "null_dominated", "free_over_post", "raw_over_post", "kappa_u_minus_kappa", "grad_share_bound"]
+        tab = d.groupby(CONDITIONS[name] + ["feature"])[cols].median()
+        out[name] = {"/".join(map(str, k)): v.round(4).to_dict() for k, v in tab.iterrows()}
+        cases = d.drop_duplicates(["source", "seed"] + CONDITIONS[name])
+        out[name]["_cases"] = {
+            "frac_at_bound_median": float(cases["frac_at_bound"].median()),
+            "frac_h_raw_indefinite": float((cases["h_raw_min_eig"] < 0).mean()),
+            "opt_grad_norm_q50_q95_max": [float(q) for q in cases["opt_grad_norm"].quantile([0.5, 0.95, 1.0])],
+            "kappa_u_max": float(d["kappa_u"].max()),
+        }
     return out
 
 
@@ -172,12 +296,14 @@ def low_support_check(dfs):
     return out
 
 
-def mask_selectivity(m):
+def mask_selectivity(m, col="log10_I_D"):
     """Q4: do masks of equal flux remove information from different features?
     Per-feature paired I_D loss for each mask, and the rank correlation between the
-    feature orderings of core and outer masks at each level (low = selective)."""
-    paired = _paired(m, m["mask_kind"] == "none")
-    tab = paired.pivot_table(index=["mask_kind", "mask_fraction"], columns="feature", values="d_log10_I_D", aggfunc="median")
+    feature orderings of core and outer masks at each level (low = selective). With
+    col="log10_I_D_fixed" the loss is measured along the undegraded case's gradient, so
+    gradient drift cannot produce it."""
+    paired = _paired(m, m["mask_kind"] == "none", col)
+    tab = paired.pivot_table(index=["mask_kind", "mask_fraction"], columns="feature", values=f"d_{col}", aggfunc="median")
     out = {"rank_corr_core_vs_outer": {}, "pixel_frac_prior_footprint": {}}
     for level in sorted(m.loc[m["mask_kind"] == "core", "mask_fraction"].unique()):
         if ("core", level) in tab.index and ("outer", level) in tab.index:
@@ -289,6 +415,9 @@ def main():
         summary["masking_response"] = response(m, "flux_removed", groups=("mask_kind",))
         summary["masking_paired_d_log10_I_D"] = paired_change(masking, masking.mask_kind == "none", ["mask_kind", "mask_fraction"])
         summary["masking_selectivity"] = mask_selectivity(masking)
+        if "log10_I_D_fixed" in masking:
+            summary["masking_selectivity_fixed_gradient"] = mask_selectivity(masking, "log10_I_D_fixed")
+            summary["masking_paired_d_log10_I_D_fixed"] = paired_change(masking, masking.mask_kind == "none", ["mask_kind", "mask_fraction"], "log10_I_D_fixed")
         summary["masking_error_prediction"] = error_prediction(masking)  # each case once (m repeats the unmasked ones)
         curves(m, "mask_fraction", "mask_kind", results_dir() / "fig_masking.png", "Experiment 1: progressive masking (median, 16-84% over sources x noise draws)")
     if snr is not None:
@@ -299,11 +428,15 @@ def main():
         blur["inv_cutoff"] = 1 / blur["blur_cutoff"]
         summary["blur_response"] = response(blur, "inv_cutoff")
         summary["blur_paired_d_log10_I_D"] = paired_change(blur, np.isinf(blur.blur_cutoff), "blur_cutoff")
+        if "log10_I_D_fixed" in blur:
+            summary["blur_paired_d_log10_I_D_fixed"] = paired_change(blur, np.isinf(blur.blur_cutoff), "blur_cutoff", "log10_I_D_fixed")
+        summary["blur_error_prediction"] = error_prediction(blur)
         curves(blur, "inv_cutoff", None, results_dir() / "fig_blur.png", "Experiment 3: Fourier low-pass (1 / cutoff; 0 = no low-pass)")
     sweeps = {k: v for k, v in (("masking", masking), ("snr", snr), ("blur", blur)) if v is not None}
     if sweeps:
         summary["low_support_check"] = low_support_check(sweeps.values())
         summary["calibration"] = calibration(sweeps)
+        summary["new_diagnostics"] = new_diagnostics(sweeps)
         plot_error_prediction(sweeps, results_dir() / "fig_error_prediction.png")
     if prior is not None:
         summary["intervention"], piv = intervention(prior, pop_std)

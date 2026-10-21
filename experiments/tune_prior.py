@@ -4,6 +4,10 @@ Selection rule (fixed before looking at results): the setting minimising the mea
 the median relative reconstruction errors for the full and half-masked observations.
 """
 
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
+
 import itertools
 
 import numpy as np

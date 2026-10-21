@@ -114,9 +114,10 @@ def test_low_support_check_splits_errors_by_flag():
     assert out["flux"]["median_abs_error_unflagged"] == pytest.approx(0.15)
 
 
-def test_calibration_counts_errors_within_one_sigma():
-    """Errors of 0.5, 1.5, 2.5 and 3.5 against sigma_post = 2 (pop. std 1): half of the
-    cases fall within 1 sigma. Cases dominated by negative-curvature modes are left out."""
+def test_calibration_counts_errors_within_each_level():
+    """Errors of 0.5, 1.5, 2.5 and 3.5 against sigma_post = 2 (pop. std 1): z = 0.25, 0.75,
+    1.25, 1.75, so half fall within 1 sigma, 3/4 within 1.645 and all within 1.96. The
+    fifth case is dominated by negative-curvature modes and only counts in "all"."""
     rows = []
     for i, err in enumerate([0.5, 1.5, 2.5, 3.5, 0.1]):
         for row in _rows(source=str(i), seed=0):
@@ -125,7 +126,35 @@ def test_calibration_counts_errors_within_one_sigma():
     df = _prepare(pd.DataFrame(rows))
     df["sigma_post_rel"] = df["sigma_post"]
     df["sigma_local_rel"] = df["sigma_local"]
-    out = analyze.calibration({"masking": df})
-    assert out["masking"]["frac_cases_used"] == pytest.approx(0.8)
-    assert out["masking"]["flux"]["sigma_post_coverage_1sigma"] == pytest.approx(0.5)
-    assert out["masking"]["flux"]["sigma_post_median_z"] == pytest.approx(1.0)
+    out = analyze.calibration({"masking": df}, n_boot=20)["masking"]
+    excl = out["excl_neg_modes"]
+    assert excl["frac_cases_used"] == pytest.approx(0.8)
+    assert excl["flux"]["sigma_post_coverage_68"]["value"] == pytest.approx(0.5)
+    assert excl["flux"]["sigma_post_coverage_90"]["value"] == pytest.approx(0.75)
+    assert excl["flux"]["sigma_post_coverage_95"]["value"] == pytest.approx(1.0)
+    assert excl["flux"]["sigma_post_median_z"] == pytest.approx(1.0)  # all errors positive: bias
+    lo, hi = excl["flux"]["sigma_post_coverage_68"]["ci95"]
+    assert 0 <= lo <= 0.5 <= hi <= 1
+    assert out["all"]["frac_cases_used"] == pytest.approx(1.0)
+
+
+def test_bootstrap_resamples_whole_galaxies():
+    sources = np.array(["a", "a", "b", "b", "b", "c"])
+    for idx in analyze._boot_indices(sources, n_boot=50, seed=1):
+        picked = sources[idx]
+        for s in np.unique(picked):  # a galaxy enters with all of its rows, or not at all
+            assert (picked == s).sum() % (sources == s).sum() == 0
+        assert len(np.unique(picked)) <= 3
+
+
+def test_partial_correlation_removes_what_severity_explains():
+    """Both the diagnostic and the error follow the degradation strength: a large raw
+    correlation, but ~0 once strength is accounted for."""
+    rng = np.random.default_rng(0)
+    severity = rng.uniform(0, 1, 400)
+    diagnostic = severity + 0.05 * rng.normal(size=400)
+    error = severity + 0.05 * rng.normal(size=400)
+    assert analyze._rho(diagnostic, error) > 0.9
+    assert abs(analyze._partial_rho(diagnostic, error, [severity])) < 0.15
+    informative = error + 0.02 * rng.normal(size=400)  # tracks the error beyond severity
+    assert analyze._partial_rho(informative, error, [severity]) > 0.5

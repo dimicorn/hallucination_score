@@ -126,3 +126,81 @@ def test_laplace_with_the_learned_prior():
         assert np.isfinite(r["sigma_post"]) and np.isfinite(r["info_gain_pop"]), a.name
         if r["neg_mode_share"] < 1e-3:
             assert a.sigma_local <= r["sigma_post"] * 1.01, a.name
+
+
+def test_review_counterexample_null_space_and_effective_share():
+    """The review's 2x2 case: the data see x1 only, phi = x1 + x2. The directional
+    sigma_data = ||g|| / sqrt(v^T F_D v) = 2 is finite, yet half of ||g||^2 lies in the
+    null space of F_D; along the least-favourable direction H^-1 g the prior supplies
+    almost all of the feature's precision, while the directional R says the opposite."""
+    f_d, f_p = np.diag([1.0, 0.0]), 0.01 * np.eye(2)
+    g = np.array([[1.0, 1.0]])
+    rows, _, _ = laplace.feature_laplace(f_d, f_p, g, np.zeros(1), np.zeros(1), np.eye(1))
+    v = g[0] / np.linalg.norm(g[0])
+    r_directional = (v @ f_p @ v) / (v @ (f_d + f_p) @ v)
+    assert np.linalg.norm(g[0]) / np.sqrt(v @ f_d @ v) == pytest.approx(2.0)
+    assert rows[0]["eta_null"] == pytest.approx(0.5)
+    assert r_directional == pytest.approx(0.02, abs=1e-3)
+    assert rows[0]["R_eff"] == pytest.approx(0.99, abs=0.01)
+
+
+def test_effective_split_sums_to_the_posterior_precision():
+    rng = np.random.default_rng(5)
+    f_d, f_p = _spd(rng, 7), _spd(rng, 7, 0.3)
+    g = rng.normal(size=(3, 7))
+    rows, _, _ = laplace.feature_laplace(f_d, f_p, g, np.zeros(3), np.zeros(3), np.eye(3))
+    h_inv = np.linalg.inv(f_d + f_p)
+    for gk, r in zip(g, rows):
+        w = h_inv @ gk
+        i_d, i_p = w @ f_d @ w / (gk @ w) ** 2, w @ f_p @ w / (gk @ w) ** 2
+        assert i_d + i_p == pytest.approx(1 / r["sigma_post"] ** 2, rel=1e-4)
+        assert r["R_eff"] == pytest.approx(i_p / (i_p + i_d), rel=1e-4)
+        assert r["eta_null"] == pytest.approx(0.0, abs=1e-9)  # F_D positive definite
+
+
+def test_free_subspace_and_unclipped_widths():
+    rng = np.random.default_rng(6)
+    f_d, f_p = _spd(rng, 6), _spd(rng, 6, 0.3)
+    g = rng.normal(size=(2, 6))
+    free = np.array([True, True, False, True, False, True])
+    rows, joint, _ = laplace.feature_laplace(f_d, f_p, g, np.zeros(2), np.zeros(2), np.eye(2), free=free)
+    h = f_d + f_p
+    for gk, r in zip(g, rows):
+        gf = gk[free]
+        assert r["sigma_post_free"] == pytest.approx(np.sqrt(gf @ np.linalg.solve(h[np.ix_(free, free)], gf)), rel=1e-4)
+        assert r["sigma_post_free"] <= r["sigma_post"] * (1 + 1e-9)  # conditioning narrows
+        assert r["grad_share_bound"] == pytest.approx((gk[~free] ** 2).sum() / (gk**2).sum())
+        assert r["sigma_post_raw"] == pytest.approx(r["sigma_post"], rel=1e-6)  # nothing clipped here
+    assert joint["h_raw_min_eig"] > 0
+
+    # an indefinite prior that makes F_D + F_P indefinite: no unclipped Laplace width
+    rows, joint, _ = laplace.feature_laplace(np.diag([1.0, 0.0]), np.diag([1.0, -0.5]), np.array([[1.0, 0.0]]), np.zeros(1), np.zeros(1), np.eye(1))
+    assert joint["h_raw_min_eig"] < 0 and np.isnan(rows[0]["sigma_post_raw"])
+
+
+def test_assess_rows_have_the_review_diagnostics(monkeypatch):
+    """End to end on a synthetic galaxy observed through a strong Fourier low-pass:
+    HF power's gradient is almost entirely in the null space of F_D (its numerator lives
+    above 0.25 cycles/px), so it is flagged even if its directional sigma_data is small."""
+    from types import SimpleNamespace
+
+    from provenance import evaluate, features
+    from provenance.pipeline import Case
+
+    truth = np.asarray(0.8 * gaussian_galaxy(2.5, 2.0, theta=0.4))
+    x_hat = jnp.asarray(np.where(truth > 1e-3, truth, 0.0), jnp.float32)  # background at the bound
+    obs = Observation(gaussian_psf(), jnp.full((N, N), 850.0, jnp.float32), blur_cutoff=0.07)
+    case = Case(obs, jnp.zeros((N, N)), x_hat, truth, 1e-5)
+    src = SimpleNamespace(truth=truth, source_id="synthetic", snr=50.0)
+    monkeypatch.setattr(evaluate, "population_moments", lambda: (np.zeros(len(features.NAMES)), np.diag([POP_STD[n] ** 2 for n in features.NAMES])))
+    rows = evaluate.assess(case, src, ScorePrior(t=0.5, weight=0.5), POP_STD, {"condition": "lowpass"}, ref_grads=features.gradients(x_hat))
+    by = {r["feature"]: r for r in rows}
+
+    assert by["hf_power"]["eta_null"] > 0.9 and "null_space_dominated" in by["hf_power"]["flags"]
+    for r in rows:
+        assert r["frac_at_bound"] > 0.5 and r["opt_grad_norm"] == 1e-5
+        if r["grad_norm"] == 0:  # asymmetry of this exactly symmetric galaxy: NaN rows by design
+            continue
+        assert 0 <= r["grad_share_bound"] <= 1 and np.isfinite(r["kappa_u"])
+        assert r["I_D_fixed"] == pytest.approx(r["I_D"], rel=1e-3) and r["cos_ref"] == pytest.approx(1.0, abs=1e-5)
+        assert 0 <= r["R_diag"] <= 1 and 0 <= r["R_eff"] <= 1

@@ -4,8 +4,9 @@
 
 Writes results/paper/fig_{main,errors,example,tsens}.{pdf,png}:
 
-main     R per feature against degradation severity (half-plane, brightest-flux and
-         faintest-flux masks, noise), with the pixel score as a dashed line
+main     R per feature against degradation severity (half-plane, core and outer masks,
+         noise), with the pixel score as a dashed line. Core/outer masks remove rings about
+         the reference centroid until a fraction of the reference flux is gone.
 errors   how well R and the pixel score predict each feature's error (Spearman, masking
          and noise), median errors of features flagged weakly constrained or not, and
          (with Laplace columns) how often the error lies within 1 sigma_local / sigma_post
@@ -16,6 +17,10 @@ example  one source observed with full data and with its faint outskirts masked:
          the feature-level data support differs. The pair is chosen from the masking
          results and the two cases are reconstructed again (they are not stored).
 """
+
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
 
 import json
 
@@ -61,7 +66,7 @@ def _median_lines(ax, df, x, y="R"):
 
 def fig_main(masking, snr):
     base = masking[masking.mask_kind == "none"]
-    panels = [("half-plane", "half-plane mask"), ("core", "brightest-flux mask"), ("outer", "faintest-flux mask")]
+    panels = [("half-plane", "half-plane mask"), ("core", "core mask"), ("outer", "outer mask")]
     fig, axes = plt.subplots(1, 4, figsize=(TEXT_WIDTH, 1.75), sharey=True)
     for ax, (kind, title) in zip(axes, panels):
         _median_lines(ax, pd.concat([base, masking[masking.mask_kind == kind]]), "mask_fraction")

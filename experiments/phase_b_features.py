@@ -6,6 +6,10 @@ checks each autodiff gradient against central finite differences on a few real
 galaxies.
 """
 
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt

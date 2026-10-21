@@ -113,7 +113,11 @@ def area_mask(shape, fraction, kind, center=None):
 
 def flux_mask(truth, fraction, kind):
     """Remove ``fraction`` of the true source flux, starting from the core
-    (kind="core") or from the outskirts (kind="outer"), in rings about the centroid."""
+    (kind="core") or from the outskirts (kind="outer"), in rings about the centroid.
+
+    Both the centroid and the flux fractions come from the reference (truth) image, so
+    these are deliberately controlled, oracle masks rather than realistic missing data,
+    and they are rings, not the brightest or faintest pixels as such."""
     truth = np.asarray(truth)
     if fraction == 0:
         return np.ones(truth.shape)

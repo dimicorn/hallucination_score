@@ -33,6 +33,8 @@ import numpy as np
 from . import curvature
 
 EIG_FLOOR = 1e-6
+NULL_TOL = 1e-6  # eigenvalues of F_D below NULL_TOL * max count as its (numerical) null space
+NULL_DOMINATED = 0.5  # null-space share of ||g||^2 above which a feature is flagged
 
 
 def dense_curvatures(obs, prior, x):
@@ -42,18 +44,26 @@ def dense_curvatures(obs, prior, x):
     return 0.5 * (f_d + f_d.T), 0.5 * (f_p + f_p.T)
 
 
-def _inverse_form(matrix, eps, g):
-    """G (M + eps I)^-1 G^T for symmetric positive semidefinite M."""
-    w, u = np.linalg.eigh(matrix)
-    z = u.T @ g.T  # (n, k)
-    return z.T @ (z / np.maximum(w + eps, eps)[:, None])
-
-
-def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov):
+def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov, free=None):
     """Per-feature rows and joint quantities for one case.
 
-    grads: (k, n) feature gradients; values: (k,) phi(x_hat); pop_mean (k,), pop_cov (k, k).
+    grads: (k, n) feature gradients; values: (k,) phi(x_hat); pop_mean (k,), pop_cov (k, k);
+    free: optional boolean (n,) mask of pixels not at the x >= 0 bound.
     Returns (list of per-feature dicts, dict of joint quantities, posterior correlation).
+
+    Per feature, besides sigma_post, info_gain_pop (the population-relative log-width
+    reduction 1/2 log(sigma_pop^2 / sigma_post^2), not a data-only information gain), the
+    KL and neg_mode_share:
+      eta_null         share of ||g||^2 in the numerical null space of F_D (what the data
+                       cannot see); the feature is not identifiable from the data alone
+                       when it is > 0, whatever sigma_data says
+      R_eff            prior share of the Laplace feature precision 1/sigma_post^2, i.e.
+                       the directional split taken along w = H^-1 g instead of g
+      sigma_post_raw   sigma_post with F_P unclipped (NaN if F_D + sym F_P is not positive
+                       definite); the clipping can only narrow sigma_post
+      sigma_post_free  the Gaussian restricted to the free pixels (conditioning on the
+                       pixels at the positivity bound); the truncated answer lies between
+      grad_share_bound share of ||g||^2 on pixels at the bound
     """
     g = np.asarray(grads, np.float64).reshape(len(values), -1)
     values = np.asarray(values, np.float64)
@@ -61,25 +71,61 @@ def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov):
     # and the joint quantities over all features are NaN too
     ok = np.all(np.isfinite(g), axis=1) & (np.abs(g).sum(axis=1) > 0) & np.isfinite(values)
     g = np.where(ok[:, None], np.nan_to_num(g), 0.0)
+    g_norm2 = np.maximum((g**2).sum(axis=1), 1e-300)
     pop_mean, pop_cov = np.asarray(pop_mean, np.float64), np.asarray(pop_cov, np.float64)
+    f_d, f_p = np.asarray(f_d, np.float64), np.asarray(f_p, np.float64)
+    nan = lambda a: np.where(ok, a, np.nan)
 
-    w_p, u_p = np.linalg.eigh(np.asarray(f_p, np.float64))
+    w_p, u_p = np.linalg.eigh(f_p)
     z_p = (u_p.T @ g.T) ** 2  # (n, k)
     neg_share = (np.abs(w_p[w_p < 0])[:, None] * z_p[w_p < 0]).sum(axis=0) / np.maximum((np.abs(w_p)[:, None] * z_p).sum(axis=0), 1e-300)
-    neg_share = np.where(ok, neg_share, np.nan)
     f_p_pos = (u_p * np.maximum(w_p, 0)) @ u_p.T
-    h = np.asarray(f_d, np.float64) + f_p_pos
-    eps = EIG_FLOOR * max(np.linalg.eigvalsh(h).max(), 1e-300)
-    post = _inverse_form(h, eps, g)
+    h = f_d + f_p_pos
+    w_h, u_h = np.linalg.eigh(h)
+    eps = EIG_FLOOR * max(w_h.max(), 1e-300)
+    z = u_h.T @ g.T  # (n, k)
+    hinv_g = u_h @ (z / np.maximum(w_h + eps, eps)[:, None])  # (n, k) = H^-1 g^T
+    post = g @ hinv_g
+    var_post, var_pop = nan(np.diag(post)), np.diag(pop_cov)
 
-    var_post, var_pop = np.where(ok, np.diag(post), np.nan), np.diag(pop_cov)
+    # prior share of the feature precision, along the least-favourable direction H^-1 g
+    norm = np.maximum(np.diag(post) ** 2, 1e-300)
+    i_d_eff = np.einsum("nk,nm,mk->k", hinv_g, f_d, hinv_g) / norm
+    i_p_eff = np.einsum("nk,nm,mk->k", hinv_g, f_p_pos, hinv_g) / norm
+    r_eff = nan(i_p_eff / np.maximum(i_p_eff + i_d_eff, 1e-300))
+
+    w_d, u_d = np.linalg.eigh(f_d)
+    null = w_d <= NULL_TOL * max(w_d.max(), 1e-300)
+    eta_null = nan(((u_d[:, null].T @ g.T) ** 2).sum(axis=0) / g_norm2)
+
+    w_r, u_r = np.linalg.eigh(f_d + f_p)
+    if w_r.min() + eps > 0:
+        z_r = u_r.T @ g.T
+        var_raw = nan((z_r**2 / (w_r + eps)[:, None]).sum(axis=0))
+    else:
+        var_raw = np.full(len(values), np.nan)
+
+    var_free = share_bound = np.full(len(values), np.nan)
+    if free is not None:
+        free = np.asarray(free, bool).ravel()
+        share_bound = nan((g[:, ~free] ** 2).sum(axis=1) / g_norm2)
+        if free.any():
+            gf = g[:, free]
+            h_ff = h[np.ix_(free, free)] + eps * np.eye(int(free.sum()))
+            var_free = nan(np.einsum("kn,nk->k", gf, np.linalg.solve(h_ff, gf.T)))
+
     kl = 0.5 * (np.log(var_pop / var_post) + (var_post + (values - pop_mean) ** 2) / var_pop - 1)
     rows = [
         {
             "sigma_post": float(np.sqrt(var_post[i])),
             "info_gain_pop": float(0.5 * np.log(var_pop[i] / var_post[i])),
             "kl_post_pop": float(kl[i]),
-            "neg_mode_share": float(neg_share[i]),
+            "neg_mode_share": float(nan(neg_share)[i]),
+            "eta_null": float(eta_null[i]),
+            "R_eff": float(r_eff[i]),
+            "sigma_post_raw": float(np.sqrt(var_raw[i])),
+            "sigma_post_free": float(np.sqrt(var_free[i])),
+            "grad_share_bound": float(share_bound[i]),
         }
         for i in range(len(values))
     ]
@@ -91,6 +137,8 @@ def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov):
     joint = {
         "info_gain_pop_joint": float(0.5 * (logdet_pop - logdet_post)),
         "kl_post_pop_joint": float(0.5 * (np.trace(pop_inv @ post) + d @ pop_inv @ d - len(values) + logdet_pop - logdet_post)),
+        "h_raw_min_eig": float(w_r.min()),
+        "h_cond": float((w_h.max() + eps) / (max(w_h.min(), 0) + eps)),
     }
     s = np.sqrt(var_post)
     return rows, joint, post / np.outer(s, s)

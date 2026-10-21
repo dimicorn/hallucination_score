@@ -19,6 +19,10 @@ Writes results/t_sensitivity.csv (one row per case, mode, t, feature),
 results/t_sensitivity.json and results/fig_t_sensitivity.png.
 """
 
+import os
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # default threading makes 1024^2 eigh ~100x slower
+
 from dataclasses import replace
 
 import matplotlib.pyplot as plt
