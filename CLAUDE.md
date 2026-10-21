@@ -10,12 +10,9 @@ Research code: feature-level prior/data attribution for galaxy image reconstruct
 uv sync                                   # CPU env; Python 3.12 only
 scripts/fetch_data.sh                     # downloads data/hsc_9697_72_subset.pkl (checksum-verified; not committed)
 uv run pytest                             # unit tests, ~100 s on a laptop (test_laplace builds dense prior curvatures), no data file needed
-uv run pytest tests/test_core.py::test_adjoint   # single test
 ```
 
 `tests/test_analyze.py` loads `experiments/analyze.py` by file path (experiments aren't a package) and tests its helpers on small synthetic tables. `analyze.py` recomputes the low-support flag from `I_D` instead of trusting the CSV's `flags` column, so it can reanalyse results written by older code.
-
-No linter or formatter is configured.
 
 Every experiment script and `tests/conftest.py` sets `OPENBLAS_NUM_THREADS=4` before numpy loads: with numpy's default OpenBLAS threading a 1024×1024 `eigh` takes ~10 s instead of ~0.1 s, which made the Laplace step 100× slower. Keep that line above the imports in new scripts.
 
@@ -44,10 +41,6 @@ GPU: on x86-64 Linux the default `uv sync` already installs the CUDA jaxlib; mac
 jaxlib is split by platform marker: `0.4.18+cuda12.cudnn89` from the `jax-cuda` index on x86-64 Linux, `0.4.18` from PyPI elsewhere. The two markers must stay disjoint, since `==0.4.18` also matches the `+cuda` local version and uv would otherwise lock the CUDA wheel for macOS. After editing dependencies, check with `uv export --no-hashes | grep jaxlib`.
 
 ## Architecture
-
-Package `src/provenance/` (installed as `provenance`), experiment drivers in `experiments/`.
-
-The pipeline for one case is: `data.Source` (SCARLET model as 32×32 peak-normalised truth + real HSC PSF and noise) → `forward.make_observation` (mask / noise scale / Fourier low-pass) → `Observation.simulate` → `reconstruct.map_estimate` → `attribution` at `x_hat`. `pipeline.run_case` does simulate+reconstruct; `evaluate.evaluate` wraps it and returns one row per feature, which `phase_d.py` collects into CSVs.
 
 Shared conventions in `pipeline.py`: every experiment script calls `parse_args()` (adds `--quick`, sets a module-level flag), then `Config.load()`, and writes output via `results_dir()` / `save_json()` so quick mode is redirected automatically. Experiment scripts shrink their own module-level sweep constants in a `use_quick_settings()` function. Follow this pattern for new experiments.
 

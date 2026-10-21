@@ -1,14 +1,106 @@
 # Results
 
-Three full runs so far. Run 3 is current. Run 1 used a fixed moment window whose
-feature gradients sat on background pixels; run 2 fixed the features but used the
-first tuning grid (t = 0.2); run 3 uses the wider grid (t = 0.5), adds the Laplace
-feature posterior and the t-sensitivity run. Question numbers Q1–Q5 refer to
-`docs/PLAN.md` §7. Phase D uses 12 eval sources; masking and SNR use 3 noise draws, blur
-uses 2. Row counts match the design in every run: masking 2520, SNR 1512, blur 840,
-prior 2520.
+Four full runs so far. **Run 4 is current for Phase D.** Run 1 used a fixed moment window
+whose feature gradients sat on background pixels; run 2 fixed the features but used the
+first tuning grid (t = 0.2); run 3 moved to t = 0.5 and added the Laplace feature posterior
+and the t-sensitivity run; run 4 reruns Phase D on 100 sources with the diagnostics
+requested by the technical review (`review.md`, response plan in
+`reports/Review concerns response plan.md`). Run 3's tuning, Phase A and t-sensitivity
+results still apply (same configuration). Question numbers Q1–Q5 refer to
+`docs/PLAN.md` §7.
 
-## Run 3: t = 0.5, Laplace diagnostics, t-sensitivity (current)
+## Run 4: 100 sources, review diagnostics (current)
+
+GPU, 2026-10-21, code at `ff44721`; masking, SNR and low-pass rerun on 100 eval sources
+(evenly spread over the 247), 3 noise draws for masking and SNR, 2 for low-pass. Row
+counts match the design: masking 33 600 (16 conditions incl. random-pixel and random-blob
+controls), SNR 12 600, low-pass 7 000. The prior-weight experiment is run 3's (12 sources).
+Configuration unchanged: t = 0.5, λ = 0.5, no annealing. Intervals are 95 % galaxy-level
+bootstrap intervals. Run 3's raw outputs are kept locally in `results/run3_t05/`.
+
+### Summary
+
+1. **The pixel score saturates; the feature level does not.** With full data, all 44
+   sources at S/N 20–40 and 91 % of those at 40–70 have ≥ 95 % of the footprint labelled
+   prior-dominated; the map flips only near S/N 100 (median 0.81 at 70–100, 0.12 at
+   100–200, 0 above). Spearman with S/N −0.86.
+2. **Feature ranking (full data, medians):**
+
+   | | flux | size | e1 | e2 | conc | asym | hf_power |
+   |---|---|---|---|---|---|---|---|
+   | log10 `I_D` | 2.31 | 2.02 | 1.79 | 1.80 | 2.17 | 1.55 | 0.92 |
+   | κ | 0.08 | 0.15 | 0.16 | 0.19 | 0.37 | 0.47 | 0.81 |
+   | R | 0.03 | 0.12 | 0.15 | 0.16 | 0.22 | 0.49 | 0.91 |
+   | R_diag (no off-diagonals) | 0.77 | 0.78 | 0.78 | 0.77 | 0.85 | 0.78 | 0.85 |
+   | R_eff (share of Laplace precision) | 0.17 | 0.32 | 0.29 | 0.30 | 0.29 | 0.70 | 0.88 |
+   | bias (σ_pop) | +0.01 | +0.14 | −0.01 | +0.06 | −0.10 | −0.82 | −0.71 |
+   | σ_post (σ_pop) | 0.04 | 0.13 | 0.34 | 0.36 | 0.15 | 0.32 | 0.15 |
+   | log-width reduction (nats) | 3.19 | 2.06 | 1.09 | 1.01 | 1.90 | 1.16 | 1.92 |
+
+3. **The prior-dominated features are the biased ones.** Asymmetry −0.82 [−1.00, −0.63]
+   and HF power −0.71 [−0.92, −0.52] σ_pop, negative in 94 % and 96 % of galaxies;
+   concentration −0.10 [−0.14, −0.06] (84 %), size +0.14 [+0.09, +0.18] (98 % positive).
+   Spearman(R, |bias|) across features 0.68.
+4. **Off-diagonal curvature is what separates the features.** Discarding it (R_diag)
+   collapses every feature to 0.77–0.85 with full data; the within-case rank agreement of
+   R and R_diag is 0.43.
+5. **Selective response to structured masks, uniform response to random ones.** Paired
+   Δlog10 `I_D` at 75 %: core (central rings) flux −0.26, others ≥ −0.18; outer rings
+   concentration −2.34, e1/e2 −1.97/−2.10, flux −1.03. Core-vs-outer rank correlation of
+   the feature orderings +0.14 / −0.64 / −0.89 at 25/50/75 % (with the fixed undegraded
+   gradient: −0.71 / −0.96 / −0.71, so gradient drift does not create it). Random-pixel
+   masks remove information uniformly: −0.29 to −0.32 dex for every feature at 50 %, −0.59 to
+   −0.64 at 75 % (log10 0.25 = −0.60). Low-pass at 0.07 cycles/px: HF power −0.91, e1/e2 −0.72/−0.79,
+   asymmetry −0.56, size −0.18, concentration −0.16, flux −0.01. Within-source Spearman of
+   `I_D` with flux removed: half-plane −0.92, core −0.54, outer −0.97, random −0.95.
+6. **Unobservable features are now flagged.** At low-pass 0.07 the median null-space share
+   of the gradient is 1.00 (HF power), 0.94–0.96 (e1, e2, asymmetry), 0.75 (size), 0.23
+   (flux). For HF power the directional σ_data is below σ_pop in 47 % of those cases, so
+   the data-only directional flag alone stayed silent; with the null-space criterion 100 %
+   are flagged. Under the 50 % half-plane mask, 18–37 % of each gradient is unobservable.
+   Flagged features have larger errors for every feature (median |error| flagged vs not:
+   flux 0.67 vs 0.05, concentration 1.41 vs 0.18, e1 0.48 vs 0.20, HF power 1.20 vs 0.57).
+7. **Error prediction: R carries nothing beyond `I_D` and is no better than R_diag or the
+   continuous pixel score.** Spearman with |error| under masking, R / R_diag / median ΔF
+   (pixel): flux 0.66 / 0.67 / 0.62, e2 0.40 / 0.44 / 0.48, concentration 0.50 / 0.50 /
+   0.38, HF power 0.11 / 0.46 / 0.68. Partial correlations given degradation strength and
+   S/N are small for R (masking flux 0.36, concentration 0.23, others ≤ 0.11) and ≤ 0 under
+   noise and low-pass; log σ_post keeps the most (concentration 0.42–0.47, HF power
+   0.42–0.47, flux 0.56 under low-pass). The off-diagonals matter for *which feature* is
+   prior-dominated, not for predicting a given case's error.
+8. **Calibration: near nominal only for ellipticity.** Coverage of ±1 σ_post (68 % nominal),
+   excluding rows with negative-mode share > 0.1 (18 % of rows):
+
+   | | flux | size | e1 | e2 | conc | asym | hf_power |
+   |---|---|---|---|---|---|---|---|
+   | masking | 0.42 | 0.31 | 0.56 | 0.75 | 0.57 | 0.22 | 0.14 |
+   | SNR | 0.42 | 0.38 | 0.62 | 0.72 | 0.53 | 0.31 | 0.36 |
+   | low-pass | 0.60 | 0.24 | 0.76 | 0.77 | 0.34 | 0.19 | 0.07 |
+
+   σ_local covers 6–23 points less. At 95 % nominal (masking): flux 0.56, size 0.56, e1
+   0.75, e2 0.96, concentration 0.84, asymmetry 0.40, HF power 0.23. Median signed z (bias)
+   and NMAD (width): flux −1.0 / 2.6, size +0.6 / 1.9, e1 −0.1 / 1.2, e2 0.0 / 0.8,
+   concentration −0.6 / 1.5, asymmetry −2.7 / 2.9, HF power −3.0 / 4.8 — both bias and
+   too-narrow widths. Removing the PSD clipping changes 68 % coverage by ≤ 0.02; restricting
+   to free pixels narrows the widths and lowers it further (concentration under masking
+   0.57 → 0.35).
+
+### Details
+
+- **PSD clipping and positivity.** σ_post without clipping differs by ≤ 1.2 % (median) where
+  F_D + sym F_P is positive definite; it is indefinite in 3–6 % of cases. 76 % of pixels sit
+  at the x ≥ 0 bound (median); gradients put 3–5 % of their weight there, except
+  concentration (35 %) and HF power (31 %), whose free-pixel σ_post is 9–11 % narrower
+  (others 2–5 %). `neg_mode_share` with full data: flux 0.13, size 0.09, others ≤ 0.03.
+- **Tweedie cap.** Along feature directions κ_u ≤ 0.94 and |κ_u − κ| ≤ 0.11 (median ≈ 0.001).
+- **σ_local ≤ σ_post** fails in 199 of 33 600 masking rows (different F_P in the two).
+- **Convergence.** 9–10 % of cases end with an absolute projected-gradient norm > 1, almost
+  all from the 16 sources with S/N > 200 (45–60 % of their cases), where the gradient scale
+  grows with the data weight. Excluding them leaves the calibration and bias conclusions
+  unchanged (asymmetry/HF power coverage gets worse, bias larger).
+- **t-sensitivity, Phase A, tuning:** see run 3 (same configuration).
+
+## Run 3: t = 0.5, Laplace diagnostics, t-sensitivity (Phase D superseded by run 4)
 
 GPU, 2026-10-21, code at `6b718d4` (analysis rerun locally with `93703da`). Tuning, Phase
 A, B and D and `t_sensitivity.py` were all rerun. Raw outputs are in `results/`; run 2's
