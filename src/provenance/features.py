@@ -4,7 +4,7 @@ All features are defined on the image itself (Route 1 in the plan). Moments use 
 adaptive elliptical Gaussian window (Bernstein & Jarvis 2002, as in HSM): starting from
 a round window at the stamp centre, iterate
 
-    centre <- centroid of x W,    M <- 2 * (second moments of x W) + MIN_VAR I
+    centre <- centroid of x W,    M <- 2 * (second moments of x W), diagonal floored
 
 where W is the Gaussian with covariance M about the centre. For a Gaussian source the
 fixed point is the source's own covariance, so size and ellipticity are unbiased, and
@@ -12,7 +12,11 @@ the window (hence every gradient) follows the source's extent instead of a fixed
 scale. A fixed wide window put almost all of each feature's gradient on background
 pixels ~10 px out, so all moment-based features measured the same annulus. The
 iteration is unrolled with a fixed count, so gradients include the window's dependence
-on x. Definitions, with M and the centre at the fixed point:
+on x. The diagonal of M has a smooth floor of MIN_VAR (1 px^2): without it the window
+collapses onto a single pixel for unresolved or spiky images (e.g. a prior-only
+reconstruction of a fully masked source), and size, e1, e2 lose their gradients. The
+floor changes Gaussian sources wider than ~1 px by < 0.5 %. Definitions, with M and the
+centre at the fixed point:
 
 flux           2 sum_i x_i W_i (adaptive flux; exact for a Gaussian source)
 size           sqrt(Mxx + Myy) [px] (second-moment radius for a Gaussian source)
@@ -36,7 +40,8 @@ NAMES = ("flux", "size", "e1", "e2", "concentration", "asymmetry", "hf_power")
 APERTURE_SOFTNESS = 0.5  # px
 N_ITER = 30  # adaptive-window iterations; the error contracts ~2x per step for Gaussians
 INIT_SIGMA = 3.0  # px, starting window
-MIN_VAR = 0.01  # px^2, keeps the window positive definite
+MIN_VAR = 1.0  # px^2, smooth floor on the window's diagonal variances
+FLOOR_SOFTNESS = 0.1  # px^2
 ASYM_WINDOW_SCALE = 2.0
 HF_CUTOFF = 0.25  # cycles / px
 
@@ -61,6 +66,11 @@ def _weighted_moments(x, w, yy, xx):
     return f, cy, cx, jnp.sum(xw * dy**2) / f, jnp.sum(xw * dx**2) / f, jnp.sum(xw * dx * dy) / f
 
 
+def _floor(v):
+    """Smooth max(v, MIN_VAR); raising the diagonal keeps M positive definite."""
+    return 0.5 * (v + MIN_VAR + jnp.sqrt((v - MIN_VAR) ** 2 + FLOOR_SOFTNESS**2))
+
+
 def adaptive_moments(x):
     """Returns (sum x W, cy, cx, Myy, Mxx, Mxy) at the fixed point of the adaptive window."""
     yy, xx = _grid(x.shape)
@@ -68,7 +78,7 @@ def adaptive_moments(x):
     def step(_, s):
         w = _window(yy, xx, *s)
         _, cy, cx, qyy, qxx, qxy = _weighted_moments(x, w, yy, xx)
-        return cy, cx, 2 * qyy + MIN_VAR, 2 * qxx + MIN_VAR, 2 * qxy
+        return cy, cx, _floor(2 * qyy), _floor(2 * qxx), 2 * qxy
 
     init = ((x.shape[0] - 1) / 2, (x.shape[1] - 1) / 2, INIT_SIGMA**2, INIT_SIGMA**2, 0.0)
     init = tuple(jnp.asarray(v, jnp.float32) for v in init)
@@ -100,7 +110,7 @@ def e2(x):
 def concentration(x):
     _, cy, cx, myy, mxx, _ = adaptive_moments(x)
     yy, xx = _grid(x.shape)
-    r = jnp.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    r = jnp.sqrt((yy - cy) ** 2 + (xx - cx) ** 2 + 1e-6)  # finite gradient when the centre sits on a pixel
     radius = jnp.sqrt(mxx + myy)
     inner = jnp.sum(x * jax.nn.sigmoid((0.5 * radius - r) / APERTURE_SOFTNESS))
     outer = jnp.sum(x * jax.nn.sigmoid((2.0 * radius - r) / APERTURE_SOFTNESS))

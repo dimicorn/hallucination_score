@@ -50,6 +50,22 @@ def test_posterior_std_does_not_depend_on_the_ridge(monkeypatch):
     np.testing.assert_allclose(stds[0], stds[-1], rtol=1e-3)
 
 
+def test_degenerate_feature_gets_nan_rows_without_touching_the_others():
+    rng = np.random.default_rng(4)
+    f_d, f_p = _spd(rng, 6), _spd(rng, 6, 0.3)
+    g = rng.normal(size=(3, 6))
+    g_bad = g.copy()
+    g_bad[1] = 0.0
+    g_bad[2, 0] = np.nan
+    rows, joint, corr = laplace.feature_laplace(f_d, f_p, g_bad, np.zeros(3), np.zeros(3), np.eye(3))
+    ref, _, _ = laplace.feature_laplace(f_d, f_p, g[:1], np.zeros(1), np.zeros(1), np.eye(1))
+    assert rows[0]["sigma_post"] == pytest.approx(ref[0]["sigma_post"])
+    for r in rows[1:]:
+        assert all(np.isnan(v) for v in r.values())
+    assert np.isnan(joint["info_gain_pop_joint"]) and np.isnan(joint["kl_post_pop_joint"])
+    assert np.isnan(corr[1, 1]) and np.isfinite(corr[0, 0])
+
+
 def test_population_terms_and_joint_quantities():
     # independent features: posterior variances 0.25 and 1.0, population variance 1
     f_d, f_p = np.diag([3.0, 0.5]), np.diag([1.0, 0.5])

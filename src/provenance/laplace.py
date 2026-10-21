@@ -57,17 +57,22 @@ def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov):
     """
     g = np.asarray(grads, np.float64).reshape(len(values), -1)
     values = np.asarray(values, np.float64)
+    # features with a zero or non-finite gradient or value have no Laplace posterior: NaN rows,
+    # and the joint quantities over all features are NaN too
+    ok = np.all(np.isfinite(g), axis=1) & (np.abs(g).sum(axis=1) > 0) & np.isfinite(values)
+    g = np.where(ok[:, None], np.nan_to_num(g), 0.0)
     pop_mean, pop_cov = np.asarray(pop_mean, np.float64), np.asarray(pop_cov, np.float64)
 
     w_p, u_p = np.linalg.eigh(np.asarray(f_p, np.float64))
     z_p = (u_p.T @ g.T) ** 2  # (n, k)
     neg_share = (np.abs(w_p[w_p < 0])[:, None] * z_p[w_p < 0]).sum(axis=0) / np.maximum((np.abs(w_p)[:, None] * z_p).sum(axis=0), 1e-300)
+    neg_share = np.where(ok, neg_share, np.nan)
     f_p_pos = (u_p * np.maximum(w_p, 0)) @ u_p.T
     h = np.asarray(f_d, np.float64) + f_p_pos
     eps = EIG_FLOOR * max(np.linalg.eigvalsh(h).max(), 1e-300)
     post = _inverse_form(h, eps, g)
 
-    var_post, var_pop = np.diag(post), np.diag(pop_cov)
+    var_post, var_pop = np.where(ok, np.diag(post), np.nan), np.diag(pop_cov)
     kl = 0.5 * (np.log(var_pop / var_post) + (var_post + (values - pop_mean) ** 2) / var_pop - 1)
     rows = [
         {
@@ -79,10 +84,10 @@ def feature_laplace(f_d, f_p, grads, values, pop_mean, pop_cov):
         for i in range(len(values))
     ]
 
-    _, logdet_post = np.linalg.slogdet(post)
+    _, logdet_post = np.linalg.slogdet(post) if ok.all() else (0.0, np.nan)
     _, logdet_pop = np.linalg.slogdet(pop_cov)
     pop_inv = np.linalg.inv(pop_cov)
-    d = values - pop_mean
+    d = np.where(ok, values, np.nan) - pop_mean
     joint = {
         "info_gain_pop_joint": float(0.5 * (logdet_pop - logdet_post)),
         "kl_post_pop_joint": float(0.5 * (np.trace(pop_inv @ post) + d @ pop_inv @ d - len(values) + logdet_pop - logdet_post)),

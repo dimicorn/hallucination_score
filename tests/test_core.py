@@ -104,6 +104,30 @@ def test_feature_gradients_finite():
         assert np.all(np.isfinite(g)), name
 
 
+def test_features_survive_a_single_pixel_spike():
+    """Regression: a prior-only reconstruction of a fully masked source can collapse to a
+    spike on one pixel. The adaptive window then shrank onto that pixel (size, e1, e2 got
+    zero gradients) and concentration's gradient was NaN, crashing Phase D."""
+    x = np.zeros((N, N), np.float32)
+    x[15, 15] = 0.54
+    x[16:, :] += 1e-3 * np.random.default_rng(0).random((N - 16, N))
+    x = jnp.asarray(x)
+    vals = features.measure(x)
+    assert all(np.isfinite(v) for v in vals.values()), vals
+    assert vals["size"] >= np.sqrt(2 * features.MIN_VAR) * 0.99  # the window stops at the floor
+    for name, g in features.gradients(x).items():
+        assert np.all(np.isfinite(g)), name
+    for name in ("flux", "size", "concentration"):
+        assert float(jnp.linalg.norm(features.gradients(x)[name])) > 0, name
+
+
+def test_attribution_record_with_zero_gradient():
+    """Regression: a zero gradient gave I_cap = 0 and kappa divided by zero in Phase D."""
+    a = attribution.FeatureAttribution("e2", 0.0, 0.0, I_D=0.0, I_P=0.0, I_cap=0.0, flags=["near_zero_total"])
+    row = a.as_dict()
+    assert np.isnan(row["kappa"]) and np.isnan(row["R"]) and row["sigma_data"] == np.inf
+
+
 def test_feature_gradients_follow_the_source():
     """The window adapts to the source, so the moment-based gradients stay on a compact,
     off-centre galaxy instead of on background pixels at the stamp scale."""

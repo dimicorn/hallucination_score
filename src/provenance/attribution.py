@@ -72,7 +72,7 @@ class FeatureAttribution:
     @property
     def kappa(self):
         """Fraction of the ceiling used by the prior: ~1 prior pins the direction, ~0 flat."""
-        return self.I_P / self.I_cap
+        return self.I_P / self.I_cap if self.I_cap > 0 else np.nan
 
     @property
     def total(self):
@@ -122,7 +122,9 @@ def feature_attribution(obs, prior, x, population_std=None, rel_tol=1e-6):
     for name, f in features.FEATURES.items():
         g = features.GRADIENTS[name](x)
         gn = float(jnp.linalg.norm(g))
-        v = g / gn if gn > 0 else g  # zero gradient (e.g. asymmetry of a symmetric image): flagged near_zero_total
+        if not gn > 0:  # zero or non-finite gradient: all curvatures 0, flagged near_zero_total
+            g, gn = jnp.zeros_like(g), 0.0
+        v = g / gn if gn > 0 else g
         i_d = curvature.quadratic_form(obs.curvature_matvec, v)
         i_p = curvature.quadratic_form(lambda u: prior.curvature_matvec(x, u), v)
         i_cap = curvature.quadratic_form(lambda u: prior.curvature_cap_matvec(x, u), v)
