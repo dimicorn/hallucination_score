@@ -116,7 +116,8 @@ are still pending the full runs.
    adaptive centre inside a window twice as wide. On the truths the background share of
    the gradient drops to 9–15% (concentration 55%, from its flat outer aperture).
    Autodiff gradients match float32 finite differences to a median relative error of
-   1–3%.
+   0.06–1.2% on the real sources. Results of the run with these features are in
+   `docs/RESULTS.md` (run 2).
 6. **Feature correlations.** On the reference set, flux and size have Spearman
    ρ = 0.91, and flux and high-frequency power ρ = −0.69. Feature-level attributions
    for these are not independent; this is reported with the results rather than

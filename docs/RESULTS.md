@@ -1,18 +1,179 @@
-# Results: first full run
+# Results
 
-> These results use the original fixed σ = 6 px moment window. Because of the
-> background-gradient problem described below, the features have since been switched to
-> adaptive windows; Phase B and Phase D need to be rerun before comparing with this file.
+Two full runs so far. Run 2 is current. Run 1 used a fixed moment window whose feature
+gradients sat on background pixels, and its feature-level numbers are superseded. Its
+pixel-level (Phase A) results still hold, because the features do not affect the
+reconstructions or the pixel scores. Question numbers Q1–Q5 refer to `docs/PLAN.md` §7.
+
+**Setup (both runs).** Tuned on the 8 dev sources: prior time t = 0.2, weight λ = 0.5,
+annealed from t = 2.0, 1500 Adam steps. Phase D uses 12 eval sources; masking and SNR use
+3 noise draws, blur uses 2. Row counts match the design: masking 2520, SNR 1512,
+blur 840, prior 2520.
+
+## Run 2: adaptive moment windows (current)
+
+GPU, 2026-10-21, code at `2159018`. Phase B and Phase D were rerun; tuning and Phase A
+were reused from run 1. Raw outputs are in `results/`; run 1's are kept locally in
+`results/run1_fixed_window/`.
+
+**What changed.** Moments use an HSM-style adaptive elliptical Gaussian window, flux is
+the adaptive flux, and asymmetry is measured about the adaptive centre in a window twice
+as wide. On the truth images, the background share of each feature's gradient fell from
+95–99.5 % to 9–15 % (concentration 55 %, because of its flat outer aperture). Autodiff
+gradients match finite differences to a median relative error of 0.06–1.2 % on the real
+sources.
+
+### Summary
+
+1. **Features now get different attributions, and the prior's curvature depends on the
+   direction.** Unmasked medians:
+
+   | | flux | size | e1 | e2 | conc | asym | hf_power |
+   |---|---|---|---|---|---|---|---|
+   | log10 `I_D` | 2.63 | 2.34 | 2.17 | 2.14 | 2.48 | 1.73 | 1.18 |
+   | κ = `I_P`/`I_cap` | 0.08 | 0.16 | 0.13 | 0.16 | 0.48 | 0.36 | 0.74 |
+   | R | 0.03 | 0.09 | 0.15 | 0.14 | 0.25 | 0.56 | 0.92 |
+   | signed error (σ_pop) | +0.02 | +0.10 | 0.00 | −0.12 | −0.03 | −0.62 | −0.48 |
+
+   The learned prior barely constrains flux, size or ellipticity, as expected for a
+   population that spans all brightnesses, scales and orientations. It constrains
+   concentration and high-frequency structure much more. `I_P` is no longer pinned at the
+   Tweedie cap (median κ 0.33, against 0.95 in run 1). Spearman(R, `I_D`) is −0.965,
+   against −0.999, so R now carries some prior-specific information.
+2. **The two most prior-dominated features are the two with systematic bias.** Asymmetry
+   and hf_power are both underestimated: the reconstruction is smoother and more
+   symmetric than the truth. All other features are within ±0.12σ. Across the seven
+   features, Spearman(R, |bias|) = 0.57.
+3. **Run 1's size and concentration biases came from the features.** With full data, the
+   errors fell from +0.62σ to +0.10σ for size, from +0.73σ to −0.03σ for concentration,
+   and from 0.14σ to 0.02σ for flux. The fixed window was largely measuring faint
+   background flux, so the halo hypothesis from run 1 no longer needs testing.
+4. **Feature-level R predicts feature errors better than the pixel score, for most
+   features.** Spearman with |error|, R against pixel fraction:
+   - masking: flux 0.45 vs 0.32, size 0.35 vs 0.27, e2 0.63 vs 0.47, concentration
+     0.35 vs 0.12
+   - SNR: flux 0.83 vs 0.64, size 0.78 vs 0.62, concentration 0.77 vs 0.57
+   - Asymmetry is the exception: the pixel score does better (masking 0.42 vs 0.32,
+     SNR 0.54 vs 0.41). For hf_power the two are comparable (R is better under masking,
+     0.54 vs 0.45; the pixel score is slightly better under SNR, 0.57 vs 0.53).
+
+### Q1: Response to removing information
+
+Change in log10 `I_D` against the unmasked case (paired by source and seed, median):
+
+| mask | flux | size | e1 | e2 | conc | asym | hf_power |
+|---|---|---|---|---|---|---|---|
+| core 0.75 | −0.31 | −0.09 | −0.15 | −0.15 | −0.05 | −0.02 | −0.19 |
+| half-plane 0.50 | −0.32 | −0.32 | −0.38 | −0.34 | −0.32 | −0.28 | −0.22 |
+| half-plane 0.75 | −7.20 | −6.73 | −6.66 | −8.00 | −5.74 | −7.69 | −1.21 |
+| outer 0.25 | −0.25 | −0.71 | −0.53 | −0.54 | −0.87 | −0.71 | −0.44 |
+| outer 0.75 | −0.92 | −1.82 | −2.03 | −2.03 | −2.13 | −1.36 | −1.02 |
+
+- **Core and outer masks now hit the features in opposite orders.** Core masks hurt flux
+  most, since flux is measured in the core. Outer masks hurt concentration and ellipticity
+  most, and flux least. Median within-source Spearman between flux removed and `I_D`: core
+  −0.78 (run 1: −0.57), half-plane −0.92, outer −0.97.
+- **Removing the whole galaxy is now detected.** At 75 % half-plane masking (≥ 99.4 % of
+  the true flux in masked rows), `I_D` falls 6–8 dex and every feature reads R = 1.00. In
+  run 1 it fell only 0.6–1.2 dex, because the gradients leaked into observed background
+  rows. The reconstruction there is a fainter, smaller galaxy supplied by the prior:
+  median flux 3.2 against a true 12.4, size 1.1 against 2.0.
+- **Blur separates features by how much fine detail they need.** Change in log10 `I_D`
+  at the strongest low-pass (cutoff 0.07 cycles/px):
+
+  | e1 | e2 | hf_power | asym | size | conc | flux |
+  |---|---|---|---|---|---|---|
+  | −0.95 | −1.00 | −0.72 | −0.59 | −0.22 | −0.14 | −0.07 |
+
+  In run 1 only hf_power responded.
+- **Features still co-vary with overall severity.** Across masking cases, the median
+  Spearman between the six non-hf features' `I_D` changes is 0.94 (minimum 0.78, for
+  asymmetry), against 0.96 in run 1. The selectivity shows up in which features each kind
+  of mask hits, not in this correlation.
+- **The SNR response still holds by construction** (F_D ∝ 1/σ²).
+
+### Q2: Prior dominance vs low total support
+
+R now separates the regimes: with no data (75 % half-plane), R = 1.00 while κ stays at
+0.2–0.6. The `weakly_constrained` flag, however, never fires in any experiment. It
+compares σ_local = ‖g‖/√(`I_P` + `I_D`) with the population spread, and the prior's
+curvature alone keeps σ_local below that spread even with no data. With no data, flux
+has σ_local = 0.04σ_pop while its actual error is about 0.6σ_pop. **When the prior
+dominates, local curvature is badly overconfident.** A flag based on the data alone
+(‖g‖/√`I_D` against the population spread) would separate "weakly constrained by the data"
+from "confidently held by the prior".
+
+Negative prior curvature now occurs in 0.6–0.8 % of rows (20/2520 in masking). These are
+flagged and excluded from R.
+
+### Q3: Stability
+
+Unchanged in kind from run 1. The pixel-level and Hutchinson results carry over.
+Feature-level t-sensitivity has not been measured. Run 1's argument that R's level is
+set by the cap applies less now that κ ≪ 1 for most features, but this needs measuring:
+evaluate the attribution at fixed reconstructions for several t.
+
+### Q4: Beyond the pixel map
+
+The pixel score still labels the whole footprint prior-dominated for every source with
+S/N ≲ 90. At the feature level, the same reconstructions range from strongly
+data-dominated (flux, R = 0.03) to prior-dominated (hf_power, R = 0.92). The ranking
+matches where the actual biases are, and the feature-level R predicts feature errors
+better than the pixel score does (Summary point 4).
+
+### Q5: Curvature vs prior-weight intervention
+
+- **The run 1 disagreement is gone.** Size and concentration are no longer
+  prior-sensitive: median S fell from 0.31/0.36 to 0.03/0.04. The median within-case
+  Spearman(R, S) went from −0.23 to +0.11.
+- **The λ intervention is a weak validator overall.** S is small for every feature
+  (median 0.01–0.05σ_pop per doubling of λ). Per-feature Spearman(R, S) ranges from
+  −0.09 to 0.36. Under noise, lower `I_D` goes with higher S for flux, size,
+  concentration, asymmetry and hf_power (ρ −0.39 to −0.53); under half-plane masking
+  there is no relation.
+- **Why it fails where the prior dominates most.** When the data carry no information,
+  the MAP estimate is the prior's mode for every λ > 0, so S → 0 in exactly the
+  prior-dominated limit. At 75 % half-plane masking, median S is 0.001–0.012. A second
+  prior, rather than a reweighted one, would be a more informative intervention
+  (PLAN C2).
+
+### Other changes
+
+Feature correlations on the reference population increased: Spearman flux–size is 0.96
+(run 1: 0.91), and size–concentration −0.79 (run 1: −0.48). Adaptive flux and size both
+scale with source extent.
+
+### Status against the BASP minimum (PLAN §8)
+
+| item | status |
+|---|---|
+| Pixel-level baseline reproduced | Qualitatively; sign saturates for S/N ≲ 90 |
+| Interpretable feature set | Yes; gradients sit on the source (except concentration's outer aperture) |
+| Defensible feature-level diagnostic | R and κ yes; σ_local is overconfident when the prior dominates |
+| Masking and S/N experiments | Done |
+| Quantitative response to information removal | Yes, and selective across features (core vs outer, blur) |
+| Comparison with the pixel baseline | Yes: different rankings per feature, better error prediction |
+| Intervention diagnostic (nice to have) | Done; weak, and blind to the fully prior-dominated limit |
+
+### Next steps
+
+1. Redefine the weak-support flag on data curvature alone (‖g‖/√`I_D`).
+2. Feature-level t-sensitivity: attribution at fixed reconstructions for several t.
+3. `analyze.py`: within-source severity correlations; report κ and signed bias per
+   feature; an S/N figure of R against error.
+4. A second prior for the intervention diagnostic, if one is available.
+5. Optionally, give concentration a smooth outer weight so that its gradient also stays
+   on the source.
+
+---
+
+## Run 1: fixed σ = 6 px moment window (superseded)
 
 Analysis of the first complete run of all phases (GPU, 2026-10-20/21, code at `f114e77`).
-Numbers come from `results/` (`analysis.json`, `phase_a.json`, `phase_d_*.csv`) plus extra
+Numbers come from what is now `results/run1_fixed_window/` (`analysis.json`, `phase_a.json`, `phase_d_*.csv`) plus extra
 checks on the raw CSVs. Question numbers Q1–Q5 refer to `docs/PLAN.md` §7.
 
-**Setup.** Tuned on the 8 dev sources: prior time t = 0.2, weight λ = 0.5, annealed from
-t = 2.0, 1500 Adam steps. Phase D uses 12 eval sources; masking and SNR use 3 noise draws,
-blur uses 2. Row counts match the design: masking 2520, SNR 1512, blur 840, prior 2520.
-
-## Summary
+### Summary
 
 1. **The feature level carries information that the pixel map does not (Q4).** The pixel
    score labels the whole footprint prior-dominated in every masking condition for every
@@ -34,7 +195,7 @@ blur uses 2. Row counts match the design: masking 2520, SNR 1512, blur 840, prio
    both are biased, and both are sensitive to the prior weight while reading
    data-dominated.
 
-## Pixel-level baseline (Phase A)
+### Pixel-level baseline (Phase A)
 
 - **Half-mask control.** Reproduced qualitatively: ΔF is higher in the masked half (median
   202 vs 105), and 33/36 cases have a prior-dominated masked half. The sign saturates,
@@ -59,7 +220,7 @@ blur uses 2. Row counts match the design: masking 2520, SNR 1512, blur 840, prio
   `test_prior_curvature_below_smoothing_cap` passes at t = 0.05 only because of its 10 %
   margin.
 
-## Where the feature gradients live
+### Where the feature gradients live
 
 Feature gradients evaluated at the truth images of the 12 eval sources (medians over
 sources):
@@ -90,7 +251,7 @@ Pixels removed by each mask (median over sources):
 | core (by flux) | 0.4 % of pixels | 0.9 % | 2.0 % |
 | outer (by flux) | 98.1 % of pixels | 99.2 % | 99.7 % |
 
-## Q1: Does data support fall when relevant measurements are removed?
+### Q1: Does data support fall when relevant measurements are removed?
 
 Yes. Within a source, `I_D` falls steadily as more of the image is masked. Median
 within-source Spearman between flux removed and `I_D` is −0.92 for half-plane masks, −0.97
@@ -121,7 +282,7 @@ Change in log10 `I_D` against the unmasked case (paired by source and seed, medi
   pooled ρ ≈ −0.70 for every feature therefore says nothing about the method. Within a
   source it would be −1.
 
-## Q2: Prior dominance vs low total support
+### Q2: Prior dominance vs low total support
 
 - **The `weakly_constrained` flag behaves sensibly with noise.** For e1 it rises from 0 %
   at noise ×0.5 to 92 % at ×16, and for size from 0 % to 72 %. It never fires for flux or
@@ -133,7 +294,7 @@ Change in log10 `I_D` against the unmasked case (paired by source and seed, medi
   (κ well below 1), as it does only for hf_power (κ ≈ 0.70) and on the footprint
   (κ ≈ 0.75).
 
-## Q3: Stability
+### Q3: Stability
 
 - **Noise draws.** The median spread over noise draws is 0.005 in log10 `I_D` and 0.002
   in R. Between sources it is 1.58 and 0.29. The spread of feature error over noise draws
@@ -144,7 +305,7 @@ Change in log10 `I_D` against the unmasked case (paired by source and seed, medi
   read R ≈ 0.3 here would read about 0.6. The tuning chose t = 0.2, the largest value in
   the grid, so the optimum may lie beyond the grid.
 
-## Q4: What feature-level attribution adds beyond the pixel map
+### Q4: What feature-level attribution adds beyond the pixel map
 
 Across all masking conditions, the pixel score is 1.0 (fully prior-dominated) in at least
 half of the cases. Feature-level R for the unmasked case:
@@ -171,7 +332,7 @@ asymmetry 0.52 vs 0.39, concentration 0.41 vs 0.03, e1 0.42 vs 0.36, e2 0.42 vs 
 Under the SNR sweep the two are comparable. Neither predicts size errors under masking
 (ρ ≈ 0).
 
-## Q5: Curvature vs prior-weight intervention
+### Q5: Curvature vs prior-weight intervention
 
 S is the change in a feature between λ = 0.5 and λ = 2, divided by twice the population
 std. That gives the change per doubling of λ, in population-std units. `I_P` scales
@@ -195,7 +356,7 @@ exactly with λ (median 260 → 525 → 1060), as expected.
 - **S predicts the actual error only weakly** (Spearman 0.46 for asymmetry, 0.39 for
   concentration, about 0 for the rest).
 
-## Status against the BASP minimum (PLAN §8)
+### Status against the BASP minimum (PLAN §8)
 
 | item | status |
 |---|---|
@@ -211,7 +372,7 @@ exactly with λ (median 260 → 525 → 1060), as expected.
 the pixel map lacks. But the feature definitions have to be fixed before the
 feature-by-feature results can be read.
 
-## Next steps
+### Next steps
 
 1. **Adaptive feature windows.** Scale the moment window and the flux aperture to each
    source's size (e.g. HSM-style adaptive moments), then rerun Phase B and Phase D. Check
